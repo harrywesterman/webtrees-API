@@ -12,10 +12,555 @@
     ],
     "paths": {
         "/media": {
-            "post": {"summary": "Upload and link an image", "description": "Upload an image as multipart/form-data and create a MEDIA record linked to an INDI, FAM or SOUR record.", "tags": ["webtrees"], "requestBody": {"required": true, "content": {"multipart/form-data": {"schema": {"type": "object", "required": ["tree", "target-xref", "target-type", "file"], "properties": {"tree": {"type": "string"}, "target-xref": {"type": "string"}, "target-type": {"type": "string", "enum": ["INDI", "FAM", "SOUR"]}, "file": {"type": "string", "format": "binary"}, "title": {"type": "string"}, "date": {"type": "string"}, "note": {"type": "string"}}}}}}, "responses": {"201": {"description": "Media created"}, "400": {"description": "Invalid request"}, "403": {"description": "Insufficient permissions"}}},
-            "get": {"summary": "Get media metadata", "tags": ["webtrees"], "parameters": [{"name": "tree", "in": "query", "required": true, "schema": {"type": "string"}}, {"name": "xref", "in": "query", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "Media metadata"}}},
-            "put": {"summary": "Update media metadata", "tags": ["webtrees"], "responses": {"200": {"description": "Media updated"}}},
-            "delete": {"summary": "Delete media", "tags": ["webtrees"], "responses": {"200": {"description": "Media deleted"}}}
+            "post": {
+                "operationId": "upload-media",
+                "summary": "upload-media",
+                "description": "Upload actual image bytes as multipart/form-data. A new OBJE record and target link await moderator approval. Each request creates a distinct file; do not blindly retry. Filename is taken from the file part.",
+                "tags": [
+                    "webtrees"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success or no change"
+                    },
+                    "201": {
+                        "description": "Upload stored; pending approval"
+                    },
+                    "202": {
+                        "description": "Change awaits approval"
+                    },
+                    "400": {
+                        "description": "Invalid input"
+                    },
+                    "401": {
+                        "description": "Missing or invalid token"
+                    },
+                    "403": {
+                        "description": "Scope or webtrees privacy/access denied"
+                    },
+                    "404": {
+                        "description": "Record not found"
+                    },
+                    "405": {
+                        "description": "Unsupported method"
+                    },
+                    "409": {
+                        "description": "Pending changes or ambiguous record"
+                    },
+                    "413": {
+                        "description": "Upload too large"
+                    },
+                    "415": {
+                        "description": "Unsupported image"
+                    },
+                    "500": {
+                        "description": "Operation failed; check record before retry"
+                    }
+                },
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "tree": {
+                                        "type": "string",
+                                        "description": "Exact tree name from get-trees."
+                                    },
+                                    "target-xref": {
+                                        "type": "string",
+                                        "description": "Existing target XREF; verify using get-record before writing."
+                                    },
+                                    "target-type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "INDI",
+                                            "FAM",
+                                            "SOUR"
+                                        ]
+                                    },
+                                    "title": {
+                                        "type": "string",
+                                        "maxLength": 16384,
+                                        "description": "Optional title. Omitted preserves existing data; empty clears it."
+                                    },
+                                    "note": {
+                                        "type": "string",
+                                        "maxLength": 16384,
+                                        "description": "Optional note. Omitted preserves existing data; empty clears it."
+                                    },
+                                    "date": {
+                                        "type": "string",
+                                        "maxLength": 16384,
+                                        "description": "Optional media date as supplied by user, stored in webtrees _DATE. Omitted preserves it; empty clears it."
+                                    },
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary",
+                                        "description": "JPEG/PNG/GIF/WebP, up to 20 MiB and 40 megapixels; also subject to PHP limits."
+                                    }
+                                },
+                                "required": [
+                                    "tree",
+                                    "target-xref",
+                                    "target-type",
+                                    "file"
+                                ],
+                                "additionalProperties": false
+                            }
+                        }
+                    }
+                }
+            },
+            "get": {
+                "operationId": "get-media",
+                "summary": "get-media",
+                "description": "Read visible media filenames, webtrees page URL and pending status. For bytes use authenticated REST GET /media/download with tree, xref and filename; the webtrees page URL is not a public file URL.",
+                "tags": [
+                    "webtrees"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success or no change"
+                    },
+                    "201": {
+                        "description": "Upload stored; pending approval"
+                    },
+                    "202": {
+                        "description": "Change awaits approval"
+                    },
+                    "400": {
+                        "description": "Invalid input"
+                    },
+                    "401": {
+                        "description": "Missing or invalid token"
+                    },
+                    "403": {
+                        "description": "Scope or webtrees privacy/access denied"
+                    },
+                    "404": {
+                        "description": "Record not found"
+                    },
+                    "405": {
+                        "description": "Unsupported method"
+                    },
+                    "409": {
+                        "description": "Pending changes or ambiguous record"
+                    },
+                    "413": {
+                        "description": "Upload too large"
+                    },
+                    "415": {
+                        "description": "Unsupported image"
+                    },
+                    "500": {
+                        "description": "Operation failed; check record before retry"
+                    }
+                },
+                "parameters": [
+                    {
+                        "name": "tree",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "description": "Exact tree name from get-trees."
+                        }
+                    },
+                    {
+                        "name": "xref",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "description": "Existing OBJE media XREF, without @ signs."
+                        }
+                    }
+                ]
+            },
+            "put": {
+                "operationId": "update-media",
+                "summary": "update-media",
+                "description": "Submit a media metadata change. Omitted fields remain unchanged; empty fields clear one value. Multiple titles/files or notes may require editing in webtrees. Await moderator approval before another write.",
+                "tags": [
+                    "webtrees"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success or no change"
+                    },
+                    "201": {
+                        "description": "Upload stored; pending approval"
+                    },
+                    "202": {
+                        "description": "Change awaits approval"
+                    },
+                    "400": {
+                        "description": "Invalid input"
+                    },
+                    "401": {
+                        "description": "Missing or invalid token"
+                    },
+                    "403": {
+                        "description": "Scope or webtrees privacy/access denied"
+                    },
+                    "404": {
+                        "description": "Record not found"
+                    },
+                    "405": {
+                        "description": "Unsupported method"
+                    },
+                    "409": {
+                        "description": "Pending changes or ambiguous record"
+                    },
+                    "413": {
+                        "description": "Upload too large"
+                    },
+                    "415": {
+                        "description": "Unsupported image"
+                    },
+                    "500": {
+                        "description": "Operation failed; check record before retry"
+                    }
+                },
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "tree": {
+                                        "type": "string",
+                                        "description": "Exact tree name from get-trees."
+                                    },
+                                    "xref": {
+                                        "type": "string",
+                                        "description": "Existing OBJE media XREF, without @ signs."
+                                    },
+                                    "title": {
+                                        "type": "string",
+                                        "maxLength": 16384,
+                                        "description": "Optional title. Omitted preserves existing data; empty clears it."
+                                    },
+                                    "note": {
+                                        "type": "string",
+                                        "maxLength": 16384,
+                                        "description": "Optional note. Omitted preserves existing data; empty clears it."
+                                    },
+                                    "date": {
+                                        "type": "string",
+                                        "maxLength": 16384,
+                                        "description": "Optional media date as supplied by user, stored in webtrees _DATE. Omitted preserves it; empty clears it."
+                                    }
+                                },
+                                "required": [
+                                    "tree",
+                                    "xref"
+                                ],
+                                "additionalProperties": false
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "operationId": "delete-media",
+                "summary": "delete-media",
+                "description": "Request deletion of an unlinked approved media record. Unlink and approve all links first. The file is deliberately retained for pending/rejected changes and shared references; administrator cleanup of unused files is separate.",
+                "tags": [
+                    "webtrees"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success or no change"
+                    },
+                    "201": {
+                        "description": "Upload stored; pending approval"
+                    },
+                    "202": {
+                        "description": "Change awaits approval"
+                    },
+                    "400": {
+                        "description": "Invalid input"
+                    },
+                    "401": {
+                        "description": "Missing or invalid token"
+                    },
+                    "403": {
+                        "description": "Scope or webtrees privacy/access denied"
+                    },
+                    "404": {
+                        "description": "Record not found"
+                    },
+                    "405": {
+                        "description": "Unsupported method"
+                    },
+                    "409": {
+                        "description": "Pending changes or ambiguous record"
+                    },
+                    "413": {
+                        "description": "Upload too large"
+                    },
+                    "415": {
+                        "description": "Unsupported image"
+                    },
+                    "500": {
+                        "description": "Operation failed; check record before retry"
+                    }
+                },
+                "parameters": [
+                    {
+                        "name": "tree",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "description": "Exact tree name from get-trees."
+                        }
+                    },
+                    {
+                        "name": "xref",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "description": "Existing OBJE media XREF, without @ signs."
+                        }
+                    }
+                ]
+            }
+        },
+        "/media/links": {
+            "post": {
+                "operationId": "link-media",
+                "summary": "link-media",
+                "description": "Link approved media to an existing verified person, family or source at record level. An existing link is a no-op. Await moderator approval.",
+                "tags": [
+                    "webtrees"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success or no change"
+                    },
+                    "201": {
+                        "description": "Upload stored; pending approval"
+                    },
+                    "202": {
+                        "description": "Change awaits approval"
+                    },
+                    "400": {
+                        "description": "Invalid input"
+                    },
+                    "401": {
+                        "description": "Missing or invalid token"
+                    },
+                    "403": {
+                        "description": "Scope or webtrees privacy/access denied"
+                    },
+                    "404": {
+                        "description": "Record not found"
+                    },
+                    "405": {
+                        "description": "Unsupported method"
+                    },
+                    "409": {
+                        "description": "Pending changes or ambiguous record"
+                    },
+                    "413": {
+                        "description": "Upload too large"
+                    },
+                    "415": {
+                        "description": "Unsupported image"
+                    },
+                    "500": {
+                        "description": "Operation failed; check record before retry"
+                    }
+                },
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "tree": {
+                                        "type": "string",
+                                        "description": "Exact tree name from get-trees."
+                                    },
+                                    "xref": {
+                                        "type": "string",
+                                        "description": "Existing OBJE media XREF, without @ signs."
+                                    },
+                                    "target-xref": {
+                                        "type": "string",
+                                        "description": "Existing target XREF; verify using get-record before writing."
+                                    },
+                                    "target-type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "INDI",
+                                            "FAM",
+                                            "SOUR"
+                                        ]
+                                    }
+                                },
+                                "required": [
+                                    "tree",
+                                    "xref",
+                                    "target-xref",
+                                    "target-type"
+                                ],
+                                "additionalProperties": false
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "operationId": "unlink-media",
+                "summary": "unlink-media",
+                "description": "Remove the record-level media link from the selected target, preserving its other facts and links. Event-level links must be edited in webtrees. Await moderator approval.",
+                "tags": [
+                    "webtrees"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success or no change"
+                    },
+                    "201": {
+                        "description": "Upload stored; pending approval"
+                    },
+                    "202": {
+                        "description": "Change awaits approval"
+                    },
+                    "400": {
+                        "description": "Invalid input"
+                    },
+                    "401": {
+                        "description": "Missing or invalid token"
+                    },
+                    "403": {
+                        "description": "Scope or webtrees privacy/access denied"
+                    },
+                    "404": {
+                        "description": "Record not found"
+                    },
+                    "405": {
+                        "description": "Unsupported method"
+                    },
+                    "409": {
+                        "description": "Pending changes or ambiguous record"
+                    },
+                    "413": {
+                        "description": "Upload too large"
+                    },
+                    "415": {
+                        "description": "Unsupported image"
+                    },
+                    "500": {
+                        "description": "Operation failed; check record before retry"
+                    }
+                },
+                "parameters": [
+                    {
+                        "name": "tree",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "description": "Exact tree name from get-trees."
+                        }
+                    },
+                    {
+                        "name": "xref",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "description": "Existing OBJE media XREF, without @ signs."
+                        }
+                    },
+                    {
+                        "name": "target-xref",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "description": "Existing target XREF; verify using get-record before writing."
+                        }
+                    },
+                    {
+                        "name": "target-type",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "INDI",
+                                "FAM",
+                                "SOUR"
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        "/media/download": {
+            "get": {
+                "operationId": "download-media",
+                "summary": "Download a visible media file",
+                "description": "Authenticated attachment download. Supply filename returned by get-media. External URLs and traversal paths are rejected.",
+                "tags": [
+                    "webtrees"
+                ],
+                "parameters": [
+                    {
+                        "name": "tree",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "xref",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "filename",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "File bytes",
+                        "content": {
+                            "application/octet-stream": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Scope or privacy denied"
+                    },
+                    "404": {
+                        "description": "Visible file not found"
+                    }
+                }
+            }
         },
         "/add-child-to-family": {
             "post": {

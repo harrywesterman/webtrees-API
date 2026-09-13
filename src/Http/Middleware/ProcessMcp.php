@@ -68,7 +68,7 @@ class ProcessMcp implements MiddlewareInterface
 
         /** @var CustomModuleLogInterface $log_module */
         $log_module = Functions::getFromContainer(WebtreesApi::class);
-        CustomModuleLog::addDebugLog($log_module, 'MCP request' . ': ' . $raw_body);
+        CustomModuleLog::addDebugLog($log_module, 'MCP request received (' . strlen($raw_body) . ' bytes).');
 
         //If POST request, convert to a GET request with modified parameters
         if ($request->getMethod() === RequestMethodInterface::METHOD_POST) {
@@ -84,7 +84,7 @@ class ProcessMcp implements MiddlewareInterface
             }
 
             if (!mb_check_encoding($trimmed_body, 'UTF-8')) {
-                CustomModuleLog::addDebugLog($log_module, 'JSON raw body is not valid UTF-8' . ': ' . bin2hex($trimmed_body));
+                CustomModuleLog::addDebugLog($log_module, 'JSON raw body is not valid UTF-8');
             }
 
             if (preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', $trimmed_body)) {
@@ -96,7 +96,7 @@ class ProcessMcp implements MiddlewareInterface
             // If JSON parse error
             if ($trimmed_body === '' OR $body === null) {
 				// Log error
-				CustomModuleLog::addDebugLog($log_module, 'JSON parse error' . ': ' . json_last_error_msg() . ' | body: ' . $trimmed_body);
+				CustomModuleLog::addDebugLog($log_module, 'JSON parse error' . ': ' . json_last_error_msg());
 
                 $payload = [
                     'jsonrpc' => McpProtocol::JSONRPC_VERSION,

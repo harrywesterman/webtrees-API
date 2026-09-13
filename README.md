@@ -85,16 +85,21 @@ This README file contains the following main sections:
 |POST/link-spouse-to-individual|Link an existing INDI record as a spouse to an individual.|
 |POST/merge-trees|Merge two trees. |
 |PUT/modify-record|Modify the GEDCOM data of a record.|
-|POST/media|Upload an image, create a MEDIA record, and link it to an individual, family, or source.|
+|POST/media|Upload an image, create an OBJE record, and submit its link to an individual, family, or source for approval.|
 |GET/media|Retrieve media metadata and its webtrees URL.|
 |PUT/media|Update media title, date, or note.|
-|DELETE/media|Delete a MEDIA record and its file when it is inside the tree media directory.|
+|DELETE/media|Request deletion of an unlinked OBJE record; retain the file for review and shared references.|
+|GET/media/download|Download a visible media file with authentication.|
+|POST/media/links|Submit a record-level media link for approval.|
+|DELETE/media/links|Submit removal of a record-level media link for approval.|
 |POST/renumber-xrefs|Renumber the XREFs in a tree. |
 |GET/search-general|Perform a general search in webtrees.|
 |GET/trees|Get a list of the available trees.|
 |GET/version|Get the webtrees version.|
 
 ## Installation
+
+For image uploads, limits, pending-change behavior, Codex/OpenCode configuration and Dutch instructions, see the [media API guide](resources/media-api.md).
 + Install and use [Custom Module Manager](https://github.com/Jefferson49/CustomModuleManager) for an easy and convenient installation of webtrees custom modules.
 + Open the Custom Module Manager view in webtrees, select "webtrees-API", and click on the "Install Module" button.
 + Proceed to install the "Extended Import/Export" custom module, which is needed if APIs to import/export trees shall be used.

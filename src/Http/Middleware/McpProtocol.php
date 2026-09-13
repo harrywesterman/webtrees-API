@@ -305,6 +305,7 @@ class McpProtocol implements MiddlewareInterface
         $success_codes  = [
             StatusCodeInterface::STATUS_OK,
             StatusCodeInterface::STATUS_CREATED,
+            StatusCodeInterface::STATUS_ACCEPTED,
         ];
 
         /** @var CustomModuleLogInterface $log_module */

@@ -69,6 +69,13 @@ class ProcessApi implements MiddlewareInterface
         $route            = Validator::attributes($request)->route();
         $controller_class = version_compare(Webtrees::VERSION, '2.3.0', '>=') ? $route->controller : $route->handler;
 
+        if (in_array($controller_class, [\Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Media::class,
+            \Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaDownload::class,
+            \Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaLinks::class], true)) {
+            // Preserve HTTP methods and PSR-7 multipart uploads; do not parse binary bodies as JSON.
+            return $handler->handle($request);
+        }
+
         //If HTTP method is invalid, return method not allowed
         if ($request->getMethod() !== $this->getHttpMethod($controller_class)) {
             return api_response('Method Not Allowed for requested API', StatusCodeInterface::STATUS_METHOD_NOT_ALLOWED);

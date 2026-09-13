@@ -142,6 +142,13 @@ class ApiPermission implements MiddlewareInterface
         // Check if requested handler is available
         $route_handler = version_compare(Webtrees::VERSION, '2.3', '>=') ? $route->controller : $route->handler;
 
+        if (in_array($route_handler, [\Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Media::class,
+            \Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaDownload::class,
+            \Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaLinks::class], true)) {
+            // Media enforces method-specific scopes before reading any record or uploaded bytes.
+            return $handler->handle($request);
+        }
+
         if (!in_array($route_handler, $all_handlers)) {
 
             return api_response('Requested API not found.', StatusCodeInterface::STATUS_NOT_FOUND);

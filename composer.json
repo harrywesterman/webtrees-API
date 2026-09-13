@@ -32,8 +32,10 @@
         }
     ],
     "require": {
-        "php": ">=8.3",
-        "jefferson49/webtrees-common": ">=1.2.44",
+        "php": ">=8.4",
+        "ext-fileinfo": "*",
+        "ext-gd": "*",
+        "jefferson49/webtrees-common": ">=1.4.60",
         "zircote/swagger-php": "<6.0.0",
         "liberu-genealogy/php-gedcom": "dev-main",
         "league/oauth2-server": "*"

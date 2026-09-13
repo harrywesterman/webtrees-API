@@ -87,6 +87,8 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkSpouseToInd
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\McpTool;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MergeTrees;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Media;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaDownload;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaLinks;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ModifyRecord;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\RevokeToken;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\RenumberXrefs;
@@ -254,7 +256,12 @@ class WebtreesApi extends AbstractModule implements
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_MERGE_TREES, MergeTrees::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_RENUMBER_XREFS, RenumberXrefs::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_MEDIA, Media::class, null, $api_middleware);
-        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_MEDIA_DOWNLOAD, Media::class, null, $api_middleware);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_MEDIA_DOWNLOAD, MediaDownload::class, null, $api_middleware);
+        Functions::registerRoute(self::ROUTE_API . '/media/links', MediaLinks::class, null, $api_middleware);
+        if (version_compare(Webtrees::VERSION, '2.3.0', '<')) {
+            Registry::routeFactory()->routeMap()->getRoute(Media::class)->allows(['PUT', 'DELETE']);
+            Registry::routeFactory()->routeMap()->getRoute(MediaLinks::class)->allows('DELETE');
+        }
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_CONVERT_GEDCOM, ConvertGedcom::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_UNLINKED_RECORD, AddUnlinkedRecord::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_CHILD_TO_FAMILY, AddChildToFamily::class, null, $api_middleware);
@@ -490,7 +497,9 @@ class WebtreesApi extends AbstractModule implements
 
         //Create OpenAPi description
         $open_api = Generator::scan($soure_pathes, ['*.php']);
-        $json = $open_api->toJson();
+        $document = json_decode($open_api->toJson(), true, 512, JSON_THROW_ON_ERROR);
+        $document['paths'] = array_replace($document['paths'], \Jefferson49\Webtrees\Module\WebtreesApi\Http\Schema\MediaTools::openApiPaths());
+        $json = json_encode($document, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
 
         //Patch the base URL
         $json = str_replace('https://localhost/webtrees/api', $api_url, $json);

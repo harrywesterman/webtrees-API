@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "04eedd395f5e57db4c4951cbf08008e9",
+    "content-hash": "3f8778fbc16472020f2fc58da74e8e5a",
     "packages": [
         {
             "name": "defuse/php-encryption",
@@ -75,11 +75,11 @@
         },
         {
             "name": "jefferson49/webtrees-common",
-            "version": "1.2.45",
+            "version": "1.4.60",
             "source": {
                 "type": "git",
                 "url": "https://github.com/Jefferson49/webtrees-common.git",
-                "reference": "203abf0b2b43df6d26c36a2ec96c8d205890ab74"
+                "reference": "d70d508f60fd57bf4dcee66e94a2effca6ba1e26"
             },
             "require": {
                 "php": ">=7.4"
@@ -94,7 +94,7 @@
                 "webtrees",
                 "webtrees-module"
             ],
-            "time": "2026-08-15T19:05:32+00:00"
+            "time": "2026-09-09T04:09:25+00:00"
         },
         {
             "name": "lcobucci/jwt",
@@ -961,8 +961,10 @@
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {
-        "php": ">=8.3"
+        "php": ">=8.4",
+        "ext-fileinfo": "*",
+        "ext-gd": "*"
     },
     "platform-dev": {},
-    "plugin-api-version": "2.6.0"
+    "plugin-api-version": "2.9.0"
 }

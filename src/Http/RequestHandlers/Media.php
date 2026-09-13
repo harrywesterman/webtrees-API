@@ -1,69 +1,304 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers;
 
-use Fig\Http\Message\StatusCodeInterface;
+use DomainException;
+use Fisharebest\Webtrees\DB;
+use Fisharebest\Webtrees\GedcomRecord;
 use Fisharebest\Webtrees\Media as MediaRecord;
+use Fisharebest\Webtrees\MediaFile;
 use Fisharebest\Webtrees\Registry;
+use Fisharebest\Webtrees\Services\LinkedRecordService;
 use Fisharebest\Webtrees\Services\TreeService;
-use Fisharebest\Webtrees\Validator;
-use Jefferson49\Webtrees\Module\WebtreesApi\Http\Schema\Mcp as McpSchema;
+use Fisharebest\Webtrees\Tree;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\CheckAccess;
-use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\QueryParamValidator;
-use Jefferson49\Webtrees\Module\WebtreesApi\WebtreesApi;
-use OpenApi\Attributes as OA;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaInput;
+use Jefferson49\Webtrees\Module\WebtreesApi\OAuth2\Repositories\ScopeRepository as Scopes;
 use Psr\Http\Message\ResponseInterface;
-use Psr\Http\Message\StreamFactoryInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\UploadedFileInterface;
+use Psr\Http\Server\RequestHandlerInterface;
+use Nyholm\Psr7\Response;
 use Throwable;
+use Jefferson49\Webtrees\Authorization\Auth;
+use Jefferson49\Webtrees\Helpers\Authorization;
+use Jefferson49\Webtrees\Helpers\Functions;
+
 use function Jefferson49\Webtrees\Module\WebtreesApi\Helpers\api_response;
 
-class Media implements WebtreesMcpToolRequestHandlerInterface
+/** Transport adapter and shared media operations. Never auto-accept genealogy edits. */
+class Media implements RequestHandlerInterface
 {
-    public const string METHOD_DESCRIPTION = 'Create, inspect, update or delete a webtrees media record.';
-    public function __construct(private TreeService $treeService, private StreamFactoryInterface $streamFactory) {}
+    public function __construct(private TreeService $trees, private LinkedRecordService $links) {}
 
-    #[OA\Post(path: '/' . WebtreesApi::PATH_MEDIA, description: self::METHOD_DESCRIPTION, tags: ['webtrees'])]
-    #[OA\Get(path: '/' . WebtreesApi::PATH_MEDIA, description: self::METHOD_DESCRIPTION, tags: ['webtrees'])]
-    #[OA\Put(path: '/' . WebtreesApi::PATH_MEDIA, description: self::METHOD_DESCRIPTION, tags: ['webtrees'])]
-    #[OA\Delete(path: '/' . WebtreesApi::PATH_MEDIA, description: self::METHOD_DESCRIPTION, tags: ['webtrees'])]
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
-        try { return match (strtoupper($request->getMethod())) { 'POST' => $this->create($request), 'GET' => str_ends_with($request->getUri()->getPath(), '/' . WebtreesApi::PATH_MEDIA_DOWNLOAD) ? $this->download($request) : $this->inspect($request), 'PUT' => $this->update($request), 'DELETE' => $this->remove($request), default => api_response('HTTP method not supported.', 405) }; }
-        catch (Throwable $e) { return api_response($e->getMessage(), 500); }
+        $action = match ($request->getMethod()) {
+            'GET' => 'get-media', 'POST' => 'upload-media',
+            'PUT' => 'update-media', 'DELETE' => 'delete-media', default => '',
+        };
+        return $this->execute($request, $action);
     }
 
-    private function tree(ServerRequestInterface $request): array|ResponseInterface
+    public function execute(ServerRequestInterface $request, string $action): ResponseInterface
     {
-        $name = Validator::queryParams($request)->string('tree', '');
-        $check = QueryParamValidator::validateTreeName($this->treeService, $name);
-        return $check->getStatusCode() === 200 ? [$this->treeService->all()[$name], $name] : $check;
+        return $this->perform($request, $action)->withHeader('Cache-Control', 'private, no-store');
     }
-    private function writeAccess($tree): ?ResponseInterface { $r = CheckAccess::checkUserWriteAccess($tree); return $r->getStatusCode() === 200 ? null : $r; }
-    private function record($xref, $tree, bool $edit = false): array|ResponseInterface
-    { $r = Registry::gedcomRecordFactory()->make($xref, $tree); if ($r === null) return api_response('Record not found.', 404); $a = CheckAccess::checkRecordAccess($r, $edit); return $a->getStatusCode() === 200 ? [$r, $a] : $a; }
 
-    private function create(ServerRequestInterface $request): ResponseInterface
+    private function perform(ServerRequestInterface $request, string $action): ResponseInterface
     {
-        $ctx = $this->tree($request); if ($ctx instanceof ResponseInterface) return $ctx; [$tree] = $ctx; if (($a = $this->writeAccess($tree)) !== null) return $a;
-        $q = Validator::queryParams($request); $type = strtoupper($q->string('target-type', '')); $target = $this->record($q->string('target-xref', ''), $tree, true);
-        if ($target instanceof ResponseInterface) return $target; [$targetRecord] = $target; if ($targetRecord->tag() !== $type || !in_array($type, ['INDI', 'FAM', 'SOUR'], true)) return api_response('Invalid target record.', 400);
-        $file = $request->getUploadedFiles()['file'] ?? null; if (!$file instanceof UploadedFileInterface || $file->getError() !== UPLOAD_ERR_OK) return api_response('A valid multipart file field is required.', 400);
-        $mime = strtolower((string) $file->getClientMediaType()); if (!in_array($mime, ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/tiff'], true)) return api_response('Unsupported image type.', 415);
-        $base = trim((string) $tree->getPreference('MEDIA_DIRECTORY'), '/'); $name = $this->safeName((string) $file->getClientFilename()); $path = $base . '/' . $name; $fs = Registry::filesystem()->data(); if ($fs->fileExists($path)) return api_response('Media file already exists.', 409);
-        $fs->writeStream($path, $file->getStream()->detach()); $qv = fn(string $key): string => $q->string($key, ''); $gedcom = "1 FILE $path\n2 FORM " . strtoupper(substr($mime, 6)); foreach (['title' => 'TITL', 'date' => 'DATE', 'note' => 'NOTE'] as $k => $tag) if (($v = $qv($k)) !== '') $gedcom .= "\n1 $tag $v";
-        try { $media = $tree->createRecord("0 @@ MEDIA\n$gedcom"); $targetRecord->updateRecord($targetRecord->gedcom() . "\n1 OBJE @" . $media->xref() . '@', false); return api_response(['xref' => $media->xref(), 'file' => $path], 201); } catch (Throwable $e) { if ($fs->fileExists($path)) $fs->delete($path); throw $e; }
+        try {
+            if (!in_array($action, ['upload-media', 'get-media', 'download-media', 'update-media', 'link-media', 'unlink-media', 'delete-media'], true)) {
+                throw new DomainException('Method not allowed.', 405);
+            }
+            $write = !in_array($action, ['get-media', 'download-media'], true);
+            $mcp = $request->getAttribute('media_mcp', false) === true;
+            $scopes = $request->getAttribute('oauth_scopes', []);
+            $allowed = $write ? [$mcp ? Scopes::SCOPE_MCP_WRITE : Scopes::SCOPE_API_WRITE]
+                : ($mcp ? [Scopes::SCOPE_MCP_READ_MEMBER, Scopes::SCOPE_MCP_READ_PRIVACY] : [Scopes::SCOPE_API_READ_MEMBER, Scopes::SCOPE_API_READ_PRIVACY]);
+            if (!array_intersect($allowed, $scopes)) {
+                throw new DomainException('Insufficient media permissions.', 403);
+            }
+            $input = $request->getQueryParams();
+            if ($write && !$mcp) {
+                $body = $request->getParsedBody();
+                if ($body === null && str_contains($request->getHeaderLine('Content-Type'), 'application/json')) {
+                    $body = json_decode((string) $request->getBody(), true, 32, JSON_THROW_ON_ERROR);
+                }
+                if ($body !== null && !is_array($body)) {
+                    throw new DomainException('Expected an object request body.', 400);
+                }
+                foreach ($body ?? [] as $key => $value) {
+                    if (array_key_exists($key, $input) && $input[$key] !== $value) {
+                        throw new DomainException('Conflicting query/body field: ' . $key, 400);
+                    }
+                    $input[$key] = $value;
+                }
+            }
+            $tree = $this->trees->all()[MediaInput::text($input, 'tree')] ?? null;
+            if (!$tree instanceof Tree) {
+                throw new DomainException('Tree not found.', 404);
+            }
+            $privacy = !$write && !in_array($mcp ? Scopes::SCOPE_MCP_READ_MEMBER : Scopes::SCOPE_API_READ_MEMBER, $scopes, true);
+            if ($write) {
+                $this->check(CheckAccess::checkUserWriteAccess($tree));
+            } elseif ($privacy) {
+                $this->check(CheckAccess::checkTreePrivacy($tree));
+            }
+            if ($action === 'upload-media') {
+                return $this->upload($request, $tree, $input, $mcp);
+            }
+            $record = $this->record($tree, MediaInput::text($input, 'xref'), $write, $privacy);
+            if (!$record instanceof MediaRecord) {
+                throw new DomainException('XREF must identify an OBJE media record.', 400);
+            }
+            if ($action === 'get-media') {
+                // mediaFiles() applies fact privacy; never return raw GEDCOM or private FILE paths.
+                $files = [];
+                foreach ($this->visibleFiles($record, $privacy) as $file) {
+                    $files[] = ['filename' => $file->filename(), 'title' => $file->title()];
+                }
+                $metadata = [];
+                $level = $privacy ? Auth::PRIV_PRIVATE : Authorization::accessLevelForTree($tree);
+                foreach (Functions::getRecordFacts($record, ['NOTE', '_DATE'], false, $level, true) as $fact) {
+                    $metadata[] = ['tag' => $fact->tag(), 'value' => $fact->value()];
+                }
+                return api_response(['xref' => $record->xref(), 'files' => $files, 'metadata' => $metadata, 'url' => $record->url(), 'pending' => $record->isPendingAddition()], 200);
+            }
+            if ($action === 'download-media') {
+                $name = MediaInput::text($input, 'filename');
+                $visible = $this->visibleFiles($record, $privacy)->filter(fn ($file) => $file->filename() === $name);
+                if ($visible->isEmpty()) {
+                    throw new DomainException('Visible media file not found; provide filename from get-media.', 404);
+                }
+                MediaInput::path($name);
+                $filesystem = $tree->mediaFilesystem();
+                if (!$filesystem->fileExists($name)) {
+                    throw new DomainException('Media file not found on storage.', 404);
+                }
+                $stream = $filesystem->readStream($name);
+                return new Response(200, ['Content-Type' => 'application/octet-stream', 'Content-Disposition' => 'attachment', 'X-Content-Type-Options' => 'nosniff', 'Cache-Control' => 'private, no-store'], $stream);
+            }
+            $this->editable($record);
+            if ($action === 'update-media') {
+                $gedcom = $record->gedcom();
+                if (array_key_exists('title', $input)) {
+                    // A title belongs to FILE, not to the level-zero media record.
+                    preg_match_all('/\n1 FILE[^\n]*(?:\n[2-9] [^\n]*)*/', $gedcom, $matches);
+                    if (count($matches[0]) !== 1) {
+                        throw new DomainException('Title updates require exactly one FILE fact.', 409);
+                    }
+                    $file = MediaInput::replace($matches[0][0], 2, 'TITL', MediaInput::text($input, 'title'));
+                    $gedcom = str_replace($matches[0][0], $file, $gedcom);
+                }
+                foreach (['note' => 'NOTE', 'date' => '_DATE'] as $key => $tag) {
+                    if (array_key_exists($key, $input)) {
+                        $gedcom = MediaInput::replace($gedcom, 1, $tag, MediaInput::text($input, $key));
+                    }
+                }
+                if ($gedcom === $record->gedcom()) {
+                    return api_response(['xref' => $record->xref(), 'changed' => false], 200);
+                }
+                $this->mutate([$record], fn () => $record->updateRecord($gedcom, true));
+            } elseif ($action === 'delete-media') {
+                // Requiring explicit unlink avoids modifying records the caller has not selected.
+                if ($this->links->allLinkedRecords($record)->isNotEmpty()) {
+                    throw new DomainException('Unlink this media in webtrees or with unlink-media, then approve those changes before deleting.', 409);
+                }
+                $this->mutate([$record], function () use ($record, $tree) {
+                    // The link index excludes pending GEDCOM; also reject pending references.
+                    $reference = '@' . $record->xref() . '@';
+                    foreach (DB::table('change')->where('gedcom_id', $tree->id())->where('status', 'pending')->get(['new_gedcom']) as $change) {
+                        if (str_contains($change->new_gedcom, $reference)) {
+                            throw new DomainException('Pending changes reference this media. Review them before deleting.', 409);
+                        }
+                    }
+                    $record->deleteRecord();
+                });
+                return api_response(['xref' => $record->xref(), 'pending' => true, 'file-retained' => true,
+                    'message' => 'Deletion awaits moderator approval. Files are retained for shared references and rejection; an administrator may clean unused files in webtrees.'], 202);
+            } else {
+                $target = $this->target($tree, $input);
+                $this->editable($target);
+                $line = "\n1 OBJE @" . $record->xref() . '@';
+                $old = $target->gedcom();
+                $pattern = '/\n1 OBJE @' . preg_quote($record->xref(), '/') . '@(?=\n|$)(?:\n[2-9] [^\n]*)*/';
+                $linked = preg_match($pattern, $old) === 1;
+                $new = $action === 'link-media' ? ($linked ? $old : $old . $line) : preg_replace($pattern, '', $old);
+                if ($new === $old) {
+                    return api_response(['xref' => $record->xref(), 'target-xref' => $target->xref(), 'changed' => false], 200);
+                }
+                $this->mutate([$record, $target], fn () => $target->updateRecord($new, true));
+            }
+            return api_response(['xref' => $record->xref(), 'pending' => true, 'message' => 'Change submitted. A moderator must approve it in webtrees.'], 202);
+        } catch (DomainException $e) {
+            return api_response($e->getMessage(), $e->getCode() ?: 400);
+        } catch (\JsonException) {
+            return api_response('Invalid JSON request body.', 400);
+        } catch (Throwable) {
+            return api_response('Media operation failed. No automatic retry: verify the record before retrying.', 500);
+        }
     }
-    private function inspect(ServerRequestInterface $request): ResponseInterface
-    { $ctx = $this->tree($request); if ($ctx instanceof ResponseInterface) return $ctx; [$tree] = $ctx; $r = $this->record(Validator::queryParams($request)->string('xref', ''), $tree); if ($r instanceof ResponseInterface) return $r; [$record] = $r; if (!$record instanceof MediaRecord) return api_response('Media record not found.', 404); return api_response(['xref' => $record->xref(), 'gedcom' => $record->gedcom(), 'url' => $record->mediaUrl()], 200); }
-    private function update(ServerRequestInterface $request): ResponseInterface
-    { $ctx = $this->tree($request); if ($ctx instanceof ResponseInterface) return $ctx; [$tree] = $ctx; if (($a = $this->writeAccess($tree)) !== null) return $a; $q = Validator::queryParams($request); $r = $this->record($q->string('xref', ''), $tree, true); if ($r instanceof ResponseInterface) return $r; [$record] = $r; if (!$record instanceof MediaRecord) return api_response('Media record not found.', 404); $gedcom = preg_replace('/\n1 (TITL|DATE|NOTE) .*$/m', '', $record->gedcom()); foreach (['title' => 'TITL', 'date' => 'DATE', 'note' => 'NOTE'] as $k => $tag) if (($v = $q->string($k, '')) !== '') $gedcom .= "\n1 $tag $v"; $record->updateRecord($gedcom, false); return api_response(['xref' => $record->xref(), 'updated' => true], 200); }
-    private function remove(ServerRequestInterface $request): ResponseInterface
-    { $ctx = $this->tree($request); if ($ctx instanceof ResponseInterface) return $ctx; [$tree] = $ctx; if (($a = $this->writeAccess($tree)) !== null) return $a; $q = Validator::queryParams($request); $r = $this->record($q->string('xref', ''), $tree, true); if ($r instanceof ResponseInterface) return $r; [$record] = $r; if (!$record instanceof MediaRecord) return api_response('Media record not found.', 404); $base = trim((string) $tree->getPreference('MEDIA_DIRECTORY'), '/'); if (preg_match('/^1 FILE (.+)$/m', $record->gedcom(), $m)) { $path = str_replace('\\', '/', $m[1]); if (str_starts_with($path, $base . '/') && !str_contains(substr($path, strlen($base) + 1), '..')) Registry::filesystem()->data()->delete($path); } $record->deleteRecord(); return api_response(['deleted' => $record->xref()], 200); }
-    private function safeName(string $name): string { $name = basename(str_replace('\\', '/', $name)); $name = preg_replace('/[^A-Za-z0-9._-]/', '_', $name) ?: 'upload'; return ltrim($name, '.'); }
-    public static function getMcpToolDescription(): array { return ['name' => WebtreesApi::PATH_MEDIA, 'description' => self::METHOD_DESCRIPTION, 'inputSchema' => ['type' => 'object', 'properties' => ['tree' => McpSchema::TREE, 'xref' => McpSchema::XREF, 'title' => ['type' => 'string'], 'note' => ['type' => 'string'], 'date' => ['type' => 'string']], 'required' => ['tree']]]; }
+
+    private function upload(ServerRequestInterface $request, Tree $tree, array $input, bool $mcp): ResponseInterface
+    {
+        $target = $this->target($tree, $input);
+        $this->editable($target);
+        if ($mcp) {
+            $encoded = $input['content-base64'] ?? null;
+            if (!is_string($encoded)) {
+                throw new DomainException('content-base64 is required. Read and encode the local file using client file tools.', 400);
+            }
+            $name = MediaInput::filename(MediaInput::text($input, 'filename'));
+            $bytes = MediaInput::base64($encoded);
+        } else {
+            $file = $request->getUploadedFiles()['file'] ?? null;
+            if (!$file instanceof UploadedFileInterface || $file->getError() !== UPLOAD_ERR_OK) {
+                throw new DomainException('A successful multipart file upload is required; check PHP upload/post limits.', 400);
+            }
+            $name = MediaInput::filename($file->getClientFilename() ?? '');
+            $stream = $file->getStream();
+            $bytes = '';
+            while (!$stream->eof() && strlen($bytes) <= MediaInput::REST_LIMIT) {
+                $part = $stream->read(min(65536, MediaInput::REST_LIMIT + 1 - strlen($bytes)));
+                if ($part === '') { break; }
+                $bytes .= $part;
+            }
+        }
+        $mime = MediaInput::image($bytes, $name, $mcp ? MediaInput::MCP_LIMIT : MediaInput::REST_LIMIT);
+        // A random directory preserves the readable basename without ever replacing an existing file.
+        $path = 'api-media/' . bin2hex(random_bytes(16)) . '/' . $name;
+        $fs = $tree->mediaFilesystem();
+        if ($fs->fileExists($path)) {
+            throw new DomainException('Upload path collision; retry with a new request.', 409);
+        }
+        $gedcom = "0 @@ OBJE\n1 FILE " . $path . "\n2 FORM " . strtoupper(pathinfo($name, PATHINFO_EXTENSION));
+        foreach (['title' => [2, 'TITL'], 'note' => [1, 'NOTE'], 'date' => [1, '_DATE']] as $key => [$level, $tag]) {
+            $value = MediaInput::text($input, $key);
+            if ($value !== '') { $gedcom .= "\n" . MediaInput::field($level, $tag, $value); }
+        }
+        try {
+            $fs->write($path, $bytes);
+            $record = $this->mutate([$target], function () use ($tree, $target, $gedcom) {
+                $record = $tree->createRecord($gedcom);
+                $target->updateRecord($target->gedcom() . "\n1 OBJE @" . $record->xref() . '@', true);
+                return $record;
+            });
+        } catch (Throwable $e) {
+            // Only remove this request's randomly allocated file, never a caller-supplied path.
+            try { $fs->delete($path); } catch (Throwable) {
+                error_log('webtrees API: failed upload left an unused api-media file; administrator cleanup required.');
+            }
+            throw $e;
+        }
+        return api_response(['xref' => $record->xref(), 'filename' => $path, 'mime-type' => $mime,
+            'target-xref' => $target->xref(), 'pending' => true,
+            'message' => 'Upload stored; approve BOTH the media record and target link in webtrees. Do not repeat the upload.'], 201);
     }
-    private function download(ServerRequestInterface $request): ResponseInterface
-    { $ctx = $this->tree($request); if ($ctx instanceof ResponseInterface) return $ctx; [$tree] = $ctx; $r = $this->record(Validator::queryParams($request)->string('xref', ''), $tree); if ($r instanceof ResponseInterface) return $r; [$record] = $r; if (!$record instanceof MediaRecord) return api_response('Media record not found.', 404); if (preg_match('/^1 FILE (.+)$/m', $record->gedcom(), $m) !== 1) return api_response('Media file not found.', 404); $base = trim((string) $tree->getPreference('MEDIA_DIRECTORY'), '/'); $path = str_replace('\\', '/', $m[1]); if (!str_starts_with($path, $base . '/') || str_contains(substr($path, strlen($base) + 1), '..')) return api_response('Unsafe media path.', 400); $fs = Registry::filesystem()->data(); if (!$fs->fileExists($path)) return api_response('Media file not found.', 404); $stream = $fs->readStream($path); return $this->streamFactory->createResponse()->withHeader('content-type', 'application/octet-stream')->withBody($this->streamFactory->createStreamFromResource($stream)); }
+
+    private function target(Tree $tree, array $input): GedcomRecord
+    {
+        $record = $this->record($tree, MediaInput::text($input, 'target-xref'), true, false);
+        $type = MediaInput::text($input, 'target-type');
+        if (!in_array($type, ['INDI', 'FAM', 'SOUR'], true) || $record->tag() !== $type) {
+            throw new DomainException('target-type must match the target INDI, FAM or SOUR record.', 400);
+        }
+        return $record;
+    }
+
+    private function record(Tree $tree, string $xref, bool $edit, bool $privacy): GedcomRecord
+    {
+        if (!preg_match('/^[A-Za-z0-9_:-]{1,64}$/D', $xref)) {
+            throw new DomainException('Invalid XREF.', 400);
+        }
+        $record = Registry::gedcomRecordFactory()->make($xref, $tree);
+        if ($record === null) { throw new DomainException('Record not found.', 404); }
+        $this->check(CheckAccess::checkRecordAccess($record, $edit));
+        if ($privacy) { $this->check(CheckAccess::checkRecordAccess($record, false, true)); }
+        if ($record->isPendingDeletion()) { throw new DomainException('Record has a pending deletion.', 409); }
+        return $record;
+    }
+
+    private function editable(GedcomRecord $record): void
+    {
+        if ($record->isPendingAddition()) {
+            throw new DomainException('Record has pending changes. Have a moderator review them before another media edit.', 409);
+        }
+        $all = Functions::getRecordFacts($record, [], false, Auth::PRIV_HIDE, true);
+        $visible = Functions::getRecordFacts($record, [], false, Authorization::accessLevelForTree($record->tree()), true);
+        if ($all->count() !== $visible->count()) {
+            throw new DomainException('This record contains restricted facts; edit it in webtrees.', 403);
+        }
+    }
+
+    private function visibleFiles(MediaRecord $record, bool $privacy): \Illuminate\Support\Collection
+    {
+        $level = $privacy ? Auth::PRIV_PRIVATE : Authorization::accessLevelForTree($record->tree());
+        return Functions::getRecordFacts($record, ['FILE'], false, $level, true)
+            ->map(fn ($fact) => new MediaFile($fact->gedcom(), $record));
+    }
+
+    /** Serialize media writes per tree and reject pending changes missed by cached record objects. */
+    private function mutate(array $records, callable $write): mixed
+    {
+        return DB::connection()->transaction(function () use ($records, $write) {
+            $tree = $records[0]->tree();
+            DB::table('gedcom')->where('gedcom_id', $tree->id())->lockForUpdate()->first();
+            foreach ($records as $record) {
+                if (DB::table('change')->where('gedcom_id', $tree->id())->where('xref', $record->xref())->where('status', 'pending')->exists()) {
+                    throw new DomainException('Concurrent or pending record change; review it before retrying.', 409);
+                }
+            }
+            return $write();
+        });
+    }
+
+    private function check(ResponseInterface $response): void
+    {
+        if ($response->getStatusCode() !== 200) {
+            throw new DomainException('Access denied by webtrees record, tree or privacy settings.', $response->getStatusCode());
+        }
+    }
+}

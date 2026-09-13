@@ -55,7 +55,6 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\GetRecord;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkChildToFamily;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkSpouseToIndividual;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ModifyRecord;
-use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Media;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\SearchGeneral;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Trees;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\WebtreesVersion;
@@ -146,9 +145,16 @@ class McpTool implements RequestHandlerInterface
                 case WebtreesApi::PATH_MODIFY_RECORD:
                     $handler = Registry::container()->get(ModifyRecord::class);
                     return $this->handleMcpTool($id, $request, $handler);
-                case WebtreesApi::PATH_MEDIA:
-                    $handler = Registry::container()->get(Media::class);
-                    return $this->handleMcpTool($id, $request, $handler);
+                case 'upload-media':
+                case 'get-media':
+                case 'update-media':
+                case 'link-media':
+                case 'unlink-media':
+                case 'delete-media':
+                    $media_handlers = ['upload-media' => UploadMedia::class, 'get-media' => GetMedia::class,
+                        'update-media' => UpdateMedia::class, 'link-media' => LinkMedia::class,
+                        'unlink-media' => UnlinkMedia::class, 'delete-media' => DeleteMedia::class];
+                    return $this->handleMcpTool($id, $request, Registry::container()->get($media_handlers[$tool_name]));
                 case WebtreesApi::PATH_SEARCH_GENERAL:
                     $handler = Registry::container()->get(SearchGeneral::class);
                     return $this->handleMcpTool($id, $request, $handler);

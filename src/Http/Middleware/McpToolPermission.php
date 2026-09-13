@@ -57,6 +57,7 @@ class McpToolPermission implements MiddlewareInterface
     public function __construct()
     {
         self::$mcp_read_tools = [
+            'get-media',
             WebtreesApi::PATH_GET_RECORD,
             WebtreesApi::PATH_SEARCH_GENERAL,
             WebtreesApi::PATH_GET_TREES,
@@ -64,6 +65,7 @@ class McpToolPermission implements MiddlewareInterface
         ];
 
         self::$mcp_write_tools = [
+            'upload-media', 'update-media', 'link-media', 'unlink-media', 'delete-media',
             WebtreesApi::PATH_MODIFY_RECORD,
             WebtreesApi::PATH_ADD_UNLINKED_RECORD,
             WebtreesApi::PATH_ADD_CHILD_TO_INDI,
