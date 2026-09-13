@@ -85,6 +85,10 @@ This README file contains the following main sections:
 |POST/link-spouse-to-individual|Link an existing INDI record as a spouse to an individual.|
 |POST/merge-trees|Merge two trees. |
 |PUT/modify-record|Modify the GEDCOM data of a record.|
+|POST/media|Upload an image, create a MEDIA record, and link it to an individual, family, or source.|
+|GET/media|Retrieve media metadata and its webtrees URL.|
+|PUT/media|Update media title, date, or note.|
+|DELETE/media|Delete a MEDIA record and its file when it is inside the tree media directory.|
 |POST/renumber-xrefs|Renumber the XREFs in a tree. |
 |GET/search-general|Perform a general search in webtrees.|
 |GET/trees|Get a list of the available trees.|

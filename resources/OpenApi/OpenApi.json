@@ -11,6 +11,12 @@
         }
     ],
     "paths": {
+        "/media": {
+            "post": {"summary": "Upload and link an image", "description": "Upload an image as multipart/form-data and create a MEDIA record linked to an INDI, FAM or SOUR record.", "tags": ["webtrees"], "requestBody": {"required": true, "content": {"multipart/form-data": {"schema": {"type": "object", "required": ["tree", "target-xref", "target-type", "file"], "properties": {"tree": {"type": "string"}, "target-xref": {"type": "string"}, "target-type": {"type": "string", "enum": ["INDI", "FAM", "SOUR"]}, "file": {"type": "string", "format": "binary"}, "title": {"type": "string"}, "date": {"type": "string"}, "note": {"type": "string"}}}}}}, "responses": {"201": {"description": "Media created"}, "400": {"description": "Invalid request"}, "403": {"description": "Insufficient permissions"}}},
+            "get": {"summary": "Get media metadata", "tags": ["webtrees"], "parameters": [{"name": "tree", "in": "query", "required": true, "schema": {"type": "string"}}, {"name": "xref", "in": "query", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "Media metadata"}}},
+            "put": {"summary": "Update media metadata", "tags": ["webtrees"], "responses": {"200": {"description": "Media updated"}}},
+            "delete": {"summary": "Delete media", "tags": ["webtrees"], "responses": {"200": {"description": "Media deleted"}}}
+        },
         "/add-child-to-family": {
             "post": {
                 "tags": [

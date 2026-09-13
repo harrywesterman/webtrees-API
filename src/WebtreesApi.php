@@ -86,6 +86,7 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkChildToFami
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkSpouseToIndividual;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\McpTool;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MergeTrees;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Media;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ModifyRecord;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\RevokeToken;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\RenumberXrefs;
@@ -181,6 +182,8 @@ class WebtreesApi extends AbstractModule implements
     public const string PATH_CREATE_TREE          = 'create-tree';
     public const string PATH_MERGE_TREES          = 'merge-trees';
     public const string PATH_RENUMBER_XREFS       = 'renumber-xrefs';
+    public const string PATH_MEDIA                 = 'media';
+    public const string PATH_MEDIA_DOWNLOAD       = 'media/download';
 
     //Prefences, Settings
 	public const string PREF_WEBTREES_API_TOKEN        = "webtrees_api_token";
@@ -250,6 +253,8 @@ class WebtreesApi extends AbstractModule implements
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_CREATE_TREE, CreateTree::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_MERGE_TREES, MergeTrees::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_RENUMBER_XREFS, RenumberXrefs::class, null, $api_middleware);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_MEDIA, Media::class, null, $api_middleware);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_MEDIA_DOWNLOAD, Media::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_CONVERT_GEDCOM, ConvertGedcom::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_UNLINKED_RECORD, AddUnlinkedRecord::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_CHILD_TO_FAMILY, AddChildToFamily::class, null, $api_middleware);
