@@ -141,6 +141,9 @@ $truncated = new ServerRequest('POST', '/mcp', ['Content-Type' => 'application/j
 $truncatedResponse = $processMcp->process($truncated, $next);
 $truncatedError = json_decode((string) $truncatedResponse->getBody(), true);
 check($truncatedResponse->getStatusCode() === 413 && $truncatedError['error']['data']['receivedBodyBytes'] === 2999999, 'Upstream-truncated MCP body');
+$unterminated = new ServerRequest('POST', '/mcp', ['Content-Type' => 'application/json'], '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"padding":"' . str_repeat('A', 2 * 1024 * 1024) );
+$unterminatedResponse = $processMcp->process($unterminated, $next);
+check($unterminatedResponse->getStatusCode() === 413, 'Large unterminated MCP body');
 $body = '{"jsonrpc":"2.0","id":1,"method":"tools/list"}';
 $body .= str_repeat(' ', $limit - strlen($body));
 check($processMcp->process(new ServerRequest('POST', '/mcp', ['Content-Type' => 'application/json'], $body), $next)->getStatusCode() === 200, 'Exact transport boundary allowed');

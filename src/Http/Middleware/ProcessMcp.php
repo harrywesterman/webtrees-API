@@ -120,6 +120,20 @@ class ProcessMcp implements MiddlewareInterface
 
             // If JSON parse error
             if ($trimmed_body === '' OR $body === null) {
+				// Some shared hosts truncate large JSON bodies and rewrite the
+				// visible Content-Length. A large body without a JSON terminator
+				// is then an upload-limit failure, not a client parse mistake.
+				$last = substr(rtrim($trimmed_body), -1);
+				if (strlen($trimmed_body) >= 2 * 1024 * 1024 && !in_array($last, ['}', ']'], true)) {
+					$payload = [
+						'jsonrpc' => McpProtocol::JSONRPC_VERSION, 'id' => McpProtocol::MCP_ID_DEFAULT,
+						'error' => [
+							'code' => -32000, 'message' => 'Request body too large',
+							'data' => ['receivedBodyBytes' => strlen($raw_body), 'hint' => 'The upstream server truncated the JSON body. Reduce the image or use multipart REST POST /api/media.'],
+						],
+					];
+					return api_response($payload, StatusCodeInterface::STATUS_PAYLOAD_TOO_LARGE);
+				}
 				// Log error
 				CustomModuleLog::addDebugLog($log_module, 'JSON parse error' . ': ' . json_last_error_msg());
 
