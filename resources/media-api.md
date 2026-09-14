@@ -132,7 +132,7 @@ WEBTREES_TEST_ROOT=/path/to/unpacked/webtrees php tests/media.php
 WEBTREES_TEST_ROOT=/path/to/unpacked/webtrees php tests/media-contracts.php
 ```
 
-The first suite uses real SQLite transactions, PSR-7 and Flysystem with webtrees record/access doubles. The second loads real webtrees classes and checks method availability, discovery, middleware and schema consistency. Neither logs into a live site or exercises OAuth token issuance. A production webtrees database and live Codex/OpenCode sessions remain a separate integration check before deployment. Concurrent media API writes are serialized per tree; unrelated webtrees editor actions do not take that API lock.
+The first suite uses real SQLite transactions, PSR-7 and Flysystem with webtrees record/access doubles. The second loads real webtrees classes and checks method availability, discovery, middleware and schema consistency. Neither logs into a live site or exercises OAuth token issuance. The deployed acceptance checks are recorded in `media-review.md`; an actual approved-image upload and live Codex/OpenCode session remain separate checks. Concurrent media API writes are serialized per tree; unrelated webtrees editor actions do not take that API lock.
 ## Aanvulling na live-acceptatietest (13 september 2026)
 
 - MCP pending media teruglezen vereist `mcp_read_member`, naast de webtrees-rechten van de technische gebruiker. `mcp_write` en REST-scope `api_read_member` geven geen MCP-member-leesrecht. Met alleen `mcp_read_privacy` kan een nieuwe XREF tot goedkeuring 404 geven: bewaar de XREF en upload niet opnieuw. Laat een beheerder zo nodig een passende token uitgeven.
