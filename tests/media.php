@@ -206,6 +206,11 @@ namespace {
     $read = request('GET', ['tree' => 'test', 'xref' => 'M1', 'filename' => 'photo.png'], 'api_read_privacy');
     $response = $handler->execute($read, 'download-media');
     check($response->getStatusCode() === 200 && (string) $response->getBody() === $png, 'Download');
+    foreach (['../photo.png', '/photo.png', 'https://example.net/photo.png'] as $unsafe) {
+        check($handler->execute($read->withQueryParams(['tree' => 'test', 'xref' => 'M1', 'filename' => $unsafe]), 'download-media')->getStatusCode() === 400, 'Reject unsafe download before filename lookup');
+    }
+    $oversized = request('POST', [])->withHeader('Content-Length', (string) PHP_INT_MAX);
+    check($handler->handle($oversized)->getStatusCode() === 413, 'Discarded oversized REST body');
     $record->data .= "\n1 FILE private.png";
     check(!str_contains((string) $handler->handle($read)->getBody(), 'private.png'), 'Fact privacy');
     $missing = request('GET', ['tree' => 'test', 'xref' => 'M1', 'filename' => 'private.png'], 'api_read_member');
@@ -218,6 +223,9 @@ namespace {
     Registry::$records['I1']->data = DB::table('change')->where('xref', 'I1')->value('new_gedcom');
     approved();
     check($handler->execute(request('POST', $linkInput), 'link-media')->getStatusCode() === 200, 'Duplicate link');
+    Registry::$records['I1']->pending = true;
+    check($handler->execute(request('POST', $linkInput), 'link-media')->getStatusCode() === 200, 'Duplicate link ignores unrelated target pending change');
+    Registry::$records['I1']->pending = false;
     check($handler->execute(request('DELETE', $linkInput), 'unlink-media')->getStatusCode() === 202, 'Unlink');
     approved(); $links->linked = [Registry::$records['I1']];
     check($handler->handle(request('DELETE', ['tree' => 'test', 'xref' => 'M1']))->getStatusCode() === 409, 'Linked deletion');

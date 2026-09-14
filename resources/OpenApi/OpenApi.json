@@ -116,7 +116,7 @@
             "get": {
                 "operationId": "get-media",
                 "summary": "get-media",
-                "description": "Read visible media filenames, webtrees page URL and pending status. For bytes use authenticated REST GET /media/download with tree, xref and filename; the webtrees page URL is not a public file URL.",
+                "description": "Read visible media filenames, webtrees page URL and pending status. For bytes use authenticated REST GET /api/media/download with tree, xref and filename; the webtrees page URL is not a public file URL. Reading pending records requires mcp_read_member and sufficient webtrees user rights; mcp_write or api_read_member does not grant MCP member reads. A privacy-only read may return 404 until approval; retain the upload XREF and do not re-upload. For download, filename is the complete relative storage path returned by get-media, including api-media/.../name.png, URL-encoded as a query parameter, not just the basename.",
                 "tags": [
                     "webtrees"
                 ],
@@ -336,7 +336,7 @@
             "post": {
                 "operationId": "link-media",
                 "summary": "link-media",
-                "description": "Link approved media to an existing verified person, family or source at record level. An existing link is a no-op. Await moderator approval.",
+                "description": "Link approved media to an existing verified person, family or source at record level. An existing link is a no-op only when both records have no pending changes. Pending records return 409 even for a repeated link; await moderator approval.",
                 "tags": [
                     "webtrees"
                 ],

@@ -83,7 +83,7 @@ foreach (MediaTools::ACTIONS as $action) {
 
 $next = new class implements Psr\Http\Server\RequestHandlerInterface {
     public function handle(Psr\Http\Message\ServerRequestInterface $request): Psr\Http\Message\ResponseInterface {
-        return new Response(200, [], $request->getMethod());
+        return new Response(200, [], $request->getAttribute('media_http_method', $request->getMethod()));
     }
 };
 foreach (MediaTools::ACTIONS as $action) {
@@ -99,11 +99,53 @@ foreach ([Media::class => ['GET', 'POST', 'PUT', 'DELETE'], MediaDownload::class
     $map = Registry::routeFactory()->routeMap();
     $route = $map->get($class, '/test/' . count($methods), $class)->allows($methods);
     foreach ($methods as $method) {
-        $request = (new ServerRequest($method, ''))->withAttribute('route', $route)->withAttribute('oauth_scopes', []);
-        check((string) (new ProcessApi())->process($request, $next)->getBody() === $method, 'Preserved method ' . $method);
+        $request = (new ServerRequest($method, ''))->withAttribute('route', $route)->withAttribute('oauth_scopes', [])
+            ->withParsedBody(['tree' => 'multipart-tree'])
+            ->withUploadedFiles(['file' => new Nyholm\Psr7\UploadedFile('image-bytes', 11, UPLOAD_ERR_OK, 'test.png', 'image/png')]);
+        $afterCsrf = new class($next) implements Psr\Http\Server\RequestHandlerInterface {
+            public function __construct(private Psr\Http\Server\RequestHandlerInterface $next) {}
+            public function handle(Psr\Http\Message\ServerRequestInterface $request): Psr\Http\Message\ResponseInterface {
+                check($request->getMethod() === 'GET', 'Internal OAuth request bypasses browser CSRF');
+                check($request->getParsedBody()['tree'] === 'multipart-tree' && $request->getUploadedFiles()['file']->getClientFilename() === 'test.png', 'Multipart survives internal conversion');
+                return (new Fisharebest\Webtrees\Http\Middleware\CheckCsrf())->process($request, $this->next);
+            }
+        };
+        check((string) (new ProcessApi())->process($request, $afterCsrf)->getBody() === $method, 'Preserved method through real CSRF ' . $method);
         check((new ApiPermission())->process($request, $next)->getStatusCode() === 200, 'Controller reaches own scope check');
     }
 }
+foreach ([Media::class => 'upload-media', MediaLinks::class => 'link-media'] as $class => $action) {
+    $media = Registry::container()->get(Media::class);
+    $controller = $class === Media::class ? $media : new MediaLinks($media);
+    $response = $controller->handle((new ServerRequest('GET', '/api/media'))->withAttribute('media_http_method', 'POST'));
+    check(json_decode((string) $response->getBody(), true)['action'] === $action, 'Controller recovers original POST ' . $action);
+}
+check((new MediaDownload(Registry::container()->get(Media::class)))->handle((new ServerRequest('GET', ''))->withAttribute('media_http_method', 'POST'))->getStatusCode() === 405, 'Download refuses internally converted POST');
+// Exercise the production route registration, not a test-only list of methods.
+$source = file_get_contents(__DIR__ . '/../src/WebtreesApi.php');
+foreach ([Media::class => ['GET', 'POST', 'PUT', 'DELETE'], MediaLinks::class => ['POST', 'DELETE']] as $class => $methods) {
+    $short = (new ReflectionClass($class))->getShortName();
+    preg_match('/getRoute\\(' . $short . '::class\\)->allows\\(([^;]+)\\);/', $source, $match);
+    preg_match_all("/'([A-Z]+)'/", $match[1] ?? '', $allowed);
+    check($allowed[1] === $methods, 'Production route methods ' . $short);
+}
+$processMcp = new Jefferson49\Webtrees\Module\WebtreesApi\Http\Middleware\ProcessMcp();
+$limit = $processMcp::bodyLimit();
+foreach ([['Content-Length' => (string) ($limit + 1)], []] as $headers) {
+    $body = $headers ? '' : str_repeat(' ', $limit + 1);
+    $response = $processMcp->process(new ServerRequest('POST', '/mcp', $headers, $body), $next);
+    $error = json_decode((string) $response->getBody(), true);
+    check($response->getStatusCode() === 413 && $error['id'] === null && $error['error']['data']['maxBodyBytes'] === $limit, 'Oversized MCP including discarded/missing length');
+}
+$truncated = new ServerRequest('POST', '/mcp', ['Content-Type' => 'application/json', 'Content-Length' => '3000000'], str_repeat(' ', 2999999));
+$truncatedResponse = $processMcp->process($truncated, $next);
+$truncatedError = json_decode((string) $truncatedResponse->getBody(), true);
+check($truncatedResponse->getStatusCode() === 413 && $truncatedError['error']['data']['receivedBodyBytes'] === 2999999, 'Upstream-truncated MCP body');
+$body = '{"jsonrpc":"2.0","id":1,"method":"tools/list"}';
+$body .= str_repeat(' ', $limit - strlen($body));
+check($processMcp->process(new ServerRequest('POST', '/mcp', ['Content-Type' => 'application/json'], $body), $next)->getStatusCode() === 200, 'Exact transport boundary allowed');
+check(str_contains(MediaTools::description('get-media')['description'], '/api/media/download'), 'Download tool path');
+check(str_contains(MediaTools::description('get-media')['description'], 'mcp_read_member'), 'Pending read scope documented');
 $json = json_decode(file_get_contents(__DIR__ . '/../resources/OpenApi/OpenApi.json'), true, 512, JSON_THROW_ON_ERROR);
 foreach (MediaTools::openApiPaths() as $path => $schema) { check(($json['paths'][$path] ?? null) === $schema, 'Generated OpenAPI matches ' . $path); }
 echo "PASS: $checks real-webtrees API/transport/schema contracts.\n";

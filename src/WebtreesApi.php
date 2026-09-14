@@ -259,8 +259,8 @@ class WebtreesApi extends AbstractModule implements
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_MEDIA_DOWNLOAD, MediaDownload::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/media/links', MediaLinks::class, null, $api_middleware);
         if (version_compare(Webtrees::VERSION, '2.3.0', '<')) {
-            Registry::routeFactory()->routeMap()->getRoute(Media::class)->allows(['PUT', 'DELETE']);
-            Registry::routeFactory()->routeMap()->getRoute(MediaLinks::class)->allows('DELETE');
+            Registry::routeFactory()->routeMap()->getRoute(Media::class)->allows(['GET', 'POST', 'PUT', 'DELETE']);
+            Registry::routeFactory()->routeMap()->getRoute(MediaLinks::class)->allows(['POST', 'DELETE']);
         }
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_CONVERT_GEDCOM, ConvertGedcom::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_UNLINKED_RECORD, AddUnlinkedRecord::class, null, $api_middleware);

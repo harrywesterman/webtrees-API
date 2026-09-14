@@ -1,6 +1,6 @@
 # Media API — review and client guide
 
-This fork adds image uploads to the existing webtrees module. Changes are local for review; this document does not imply a deployment or a live Codex/OpenCode test.
+This fork adds image uploads to the existing webtrees module. Deployment and live acceptance results are recorded separately from this client guide.
 
 ## Contract
 
@@ -68,7 +68,7 @@ Suggested instruction for either agent:
 
 > For webtrees images, use the media tools, not add-unlinked-record or modify-record. First identify the exact tree and verify the intended person/family/source. Read the actual local image with a file or terminal tool and encode its bytes; never invent base64. The server cannot open my local path. Call upload-media once, retain its XREF, and report the pending approval of both media and link. Use get-media to inspect visible metadata. If the payload exceeds tool/context limits, use a local multipart REST script with a separately authorized REST token; never print secrets or large base64 into chat. Do not silently resize or recompress the original. Stop on pending changes and let a moderator review them.
 
-Large base64 strings may exceed an AI client's practical tool limits even below the server's 5 MiB limit. The server limit is not a guarantee that the model can safely carry that payload in its context. Transfer bytes programmatically or use REST, not manual copying through chat. No live client upload has been performed in this local repair phase.
+Large base64 strings may exceed an AI client's practical tool limits even below the server's 5 MiB limit. The server limit is not a guarantee that the model can safely carry that payload in its context. Transfer bytes programmatically or use REST, not manual copying through chat.
 
 Example `tools/call` structure (the base64 placeholder must be replaced programmatically with actual file contents):
 
@@ -121,7 +121,7 @@ Use an HTTPS API URL. The example needs the optional `requests` package and an e
 4. De AI geeft het media-XREF terug en meldt dat zowel het mediarecord als de koppeling op goedkeuring wachten. Keur beide wijzigingen in webtrees goed voordat je verder bewerkt.
 5. `get-media` toont alleen toegankelijke bestandsnamen en metadata. Wijzigen bewaart weggelaten velden; ontkoppelen raakt alleen de opgegeven koppeling. Verwijderen bewaart het bestand zodat afwijzen van de wijziging of gedeeld gebruik geen afbeelding kwijtraakt.
 
-Deze wijzigingen zijn nog niet op DreamHost geïnstalleerd. De clientvoorbeelden zijn documentatie; bestaande clientinstellingen worden niet aangepast.
+De clientvoorbeelden zijn documentatie; bestaande clientinstellingen worden niet automatisch aangepast.
 
 ## Local verification and review
 
@@ -133,3 +133,11 @@ WEBTREES_TEST_ROOT=/path/to/unpacked/webtrees php tests/media-contracts.php
 ```
 
 The first suite uses real SQLite transactions, PSR-7 and Flysystem with webtrees record/access doubles. The second loads real webtrees classes and checks method availability, discovery, middleware and schema consistency. Neither logs into a live site or exercises OAuth token issuance. A production webtrees database and live Codex/OpenCode sessions remain a separate integration check before deployment. Concurrent media API writes are serialized per tree; unrelated webtrees editor actions do not take that API lock.
+## Aanvulling na live-acceptatietest (13 september 2026)
+
+- MCP pending media teruglezen vereist `mcp_read_member`, naast de webtrees-rechten van de technische gebruiker. `mcp_write` en REST-scope `api_read_member` geven geen MCP-member-leesrecht. Met alleen `mcp_read_privacy` kan een nieuwe XREF tot goedkeuring 404 geven: bewaar de XREF en upload niet opnieuw. Laat een beheerder zo nodig een passende token uitgeven.
+- 5 MiB is de maximale gedecodeerde afbeelding, geen gegarandeerde transportcapaciteit. MCP accepteert maximaal 8 MiB JSON, verder begrensd door PHP `post_max_size`. Base64 vergroot bestanden met ongeveer een derde. Bij overschrijding geeft de module HTTP 413 met JSON-RPC `error.data.maxBodyBytes`, ook als PHP de body heeft weggegooid. Een proxy/webserver kan eerder afwijzen.
+- Als de webserver een body afkapt maar de oorspronkelijke `Content-Length` bewaart, herkent de module dit verschil en geeft hij eveneens 413 met `receivedBodyBytes`; een afgekapt JSON-body eindigt daarmee niet meer als een misleidende JSON-RPC parse error.
+- Voor de volle 5 MiB MCP-upload is minimaal 8M `post_max_size` nodig. Voor 20 MiB REST-upload: `upload_max_filesize` minstens 20M en `post_max_size` groter dan 20M, bijvoorbeeld 24M wegens multipart-overhead. Dit zijn beheerinstructies; de code verandert geen serverconfiguratie.
+- Gebruik REST `POST /api/media`, `POST /api/media/links` en `GET /api/media/download`. Download met het volledige relatieve `filename` uit get-media, inclusief mappen, URL-gecodeerd; niet alleen de bestandsnaam.
+- Pending wijzigingen blijven beschermd. Verkeerde testuploads en links moeten door een moderator worden afgewezen. Bestandsopruiming is een aparte beheeractie; afwijzen verwijdert niet automatisch het opgeslagen bestand.

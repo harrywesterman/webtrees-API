@@ -35,7 +35,7 @@ class Media implements RequestHandlerInterface
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
-        $action = match ($request->getMethod()) {
+        $action = match ($request->getAttribute('media_http_method', $request->getMethod())) {
             'GET' => 'get-media', 'POST' => 'upload-media',
             'PUT' => 'update-media', 'DELETE' => 'delete-media', default => '',
         };
@@ -63,6 +63,11 @@ class Media implements RequestHandlerInterface
             }
             $input = $request->getQueryParams();
             if ($write && !$mcp) {
+                $postLimit = ini_parse_quantity((string) ini_get('post_max_size'));
+                $length = $request->getHeaderLine('Content-Length');
+                if ($postLimit > 0 && ctype_digit($length) && (float) $length > $postLimit) {
+                    throw new DomainException('Request exceeds PHP post_max_size; reduce the upload or contact the administrator.', 413);
+                }
                 $body = $request->getParsedBody();
                 if ($body === null && str_contains($request->getHeaderLine('Content-Type'), 'application/json')) {
                     $body = json_decode((string) $request->getBody(), true, 32, JSON_THROW_ON_ERROR);
@@ -109,11 +114,11 @@ class Media implements RequestHandlerInterface
             }
             if ($action === 'download-media') {
                 $name = MediaInput::text($input, 'filename');
+                MediaInput::path($name);
                 $visible = $this->visibleFiles($record, $privacy)->filter(fn ($file) => $file->filename() === $name);
                 if ($visible->isEmpty()) {
                     throw new DomainException('Visible media file not found; provide filename from get-media.', 404);
                 }
-                MediaInput::path($name);
                 $filesystem = $tree->mediaFilesystem();
                 if (!$filesystem->fileExists($name)) {
                     throw new DomainException('Media file not found on storage.', 404);
@@ -161,15 +166,18 @@ class Media implements RequestHandlerInterface
                     'message' => 'Deletion awaits moderator approval. Files are retained for shared references and rejection; an administrator may clean unused files in webtrees.'], 202);
             } else {
                 $target = $this->target($tree, $input);
-                $this->editable($target);
                 $line = "\n1 OBJE @" . $record->xref() . '@';
                 $old = $target->gedcom();
                 $pattern = '/\n1 OBJE @' . preg_quote($record->xref(), '/') . '@(?=\n|$)(?:\n[2-9] [^\n]*)*/';
                 $linked = preg_match($pattern, $old) === 1;
-                $new = $action === 'link-media' ? ($linked ? $old : $old . $line) : preg_replace($pattern, '', $old);
-                if ($new === $old) {
+                // A repeated link or unlink is a true no-op. It must not be
+                // blocked merely because the target has an unrelated pending
+                // change; no record is written in this branch.
+                if (($action === 'link-media' && $linked) || ($action === 'unlink-media' && !$linked)) {
                     return api_response(['xref' => $record->xref(), 'target-xref' => $target->xref(), 'changed' => false], 200);
                 }
+                $this->editable($target);
+                $new = $action === 'link-media' ? ($linked ? $old : $old . $line) : preg_replace($pattern, '', $old);
                 $this->mutate([$record, $target], fn () => $target->updateRecord($new, true));
             }
             return api_response(['xref' => $record->xref(), 'pending' => true, 'message' => 'Change submitted. A moderator must approve it in webtrees.'], 202);
@@ -195,6 +203,9 @@ class Media implements RequestHandlerInterface
             $bytes = MediaInput::base64($encoded);
         } else {
             $file = $request->getUploadedFiles()['file'] ?? null;
+            if ($file instanceof UploadedFileInterface && in_array($file->getError(), [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)) {
+                throw new DomainException('File exceeds the PHP upload limit; reduce it or contact the administrator.', 413);
+            }
             if (!$file instanceof UploadedFileInterface || $file->getError() !== UPLOAD_ERR_OK) {
                 throw new DomainException('A successful multipart file upload is required; check PHP upload/post limits.', 400);
             }

@@ -53,6 +53,13 @@ use function Jefferson49\Webtrees\Module\WebtreesApi\Helpers\api_response;
  */
 class ProcessMcp implements MiddlewareInterface
 {
+    /** Enough for a 5 MiB base64 image plus JSON metadata, never unbounded. */
+    public static function bodyLimit(): int
+    {
+        $phpLimit = ini_parse_quantity((string) ini_get('post_max_size'));
+        return $phpLimit > 0 ? min(8 * 1024 * 1024, $phpLimit) : 8 * 1024 * 1024;
+    }
+
     /**
      * A middleware to authorize access to the API
      *
@@ -63,8 +70,26 @@ class ProcessMcp implements MiddlewareInterface
      */
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
-        // Read the incoming request body once and reuse it for logging and decoding, because reading the content several times might modify it
-        $raw_body = $request->getBody()->getContents();
+        // PHP may discard an oversized body. Check the declared length before parsing,
+        // and bound reads as well for requests without Content-Length.
+        $limit = self::bodyLimit();
+        $length = $request->getHeaderLine('Content-Length');
+        $raw_body = '';
+        if (!ctype_digit($length) || (float) $length <= $limit) {
+            $stream = $request->getBody();
+            while (!$stream->eof() && strlen($raw_body) <= $limit) {
+                $chunk = $stream->read(min(8192, $limit + 1 - strlen($raw_body)));
+                if ($chunk === '') { break; }
+                $raw_body .= $chunk;
+            }
+        }
+        if ((ctype_digit($length) && ((float) $length > $limit || strlen($raw_body) < (float) $length)) || strlen($raw_body) > $limit) {
+            return api_response([
+                'jsonrpc' => '2.0', 'id' => null,
+                'error' => ['code' => -32000, 'message' => 'Request body too large',
+                    'data' => ['maxBodyBytes' => $limit, 'receivedBodyBytes' => strlen($raw_body), 'hint' => 'The upstream server discarded part of the body or the configured limit was exceeded. Reduce the image or ask the administrator to raise the request-body limit. Base64 adds about one third to file size.']],
+            ], StatusCodeInterface::STATUS_PAYLOAD_TOO_LARGE);
+        }
 
         /** @var CustomModuleLogInterface $log_module */
         $log_module = Functions::getFromContainer(WebtreesApi::class);

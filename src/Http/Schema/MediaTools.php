@@ -69,16 +69,23 @@ final class MediaTools
             $required = ['tree', 'target-xref', 'target-type', 'filename', 'content-base64'];
             $properties['filename'] = ['type' => 'string', 'maxLength' => 180, 'description' => 'Basename including JPEG/PNG/GIF/WebP extension, never a path.'];
             $properties['content-base64'] = ['type' => 'string', 'maxLength' => 6990508,
-                'description' => 'Actual local file bytes encoded as canonical base64, at most 5 MiB decoded. Use a file/terminal tool to encode it; never invent bytes. No data URL prefix or whitespace.'];
+                'description' => 'Actual local file bytes encoded as canonical base64, at most 5 MiB decoded, subject to the server PHP post_max_size transport limit (base64 adds about one third). HTTP 413 reports maxBodyBytes; reduce the image or ask the administrator to raise that limit. Use a file/terminal tool to encode it; never invent bytes. No data URL prefix or whitespace.'];
         }
         $description = match ($action) {
             'upload-media' => 'Upload a local image and link it to a verified INDI/FAM/SOUR. First get-trees and get-record. Read and base64-encode the actual file using your client file tools; the remote server cannot open local paths. If the client cannot safely pass the base64 payload, use authenticated multipart REST POST /media (up to 20 MiB) from a local script. Never put secrets or base64 in query URLs. On success retain the returned media XREF and do not upload again: BOTH record and link await moderator approval.',
             'get-media' => 'Read visible media filenames, webtrees page URL and pending status. For bytes use authenticated REST GET /media/download with tree, xref and filename; the webtrees page URL is not a public file URL.',
             'update-media' => 'Submit a media metadata change. Omitted fields remain unchanged; empty fields clear one value. Multiple titles/files or notes may require editing in webtrees. Await moderator approval before another write.',
-            'link-media' => 'Link approved media to an existing verified person, family or source at record level. An existing link is a no-op. Await moderator approval.',
+            'link-media' => 'Link approved media to an existing verified person, family or source at record level. An existing link is a no-op only when both records have no pending changes. Pending records return 409 even for a repeated link; await moderator approval.',
             'unlink-media' => 'Remove the record-level media link from the selected target, preserving its other facts and links. Event-level links must be edited in webtrees. Await moderator approval.',
             'delete-media' => 'Request deletion of an unlinked approved media record. Unlink and approve all links first. The file is deliberately retained for pending/rejected changes and shared references; administrator cleanup of unused files is separate.',
         };
+        $description = str_replace(['REST POST /media', 'REST GET /media/download'], ['REST POST /api/media', 'REST GET /api/media/download'], $description);
+        if ($action === 'get-media' || $action === 'upload-media') {
+            $description .= ' Reading pending records requires mcp_read_member and sufficient webtrees user rights; mcp_write or api_read_member does not grant MCP member reads. A privacy-only read may return 404 until approval; retain the upload XREF and do not re-upload.';
+        }
+        if ($action === 'get-media') {
+            $description .= ' For download, filename is the complete relative storage path returned by get-media, including api-media/.../name.png, URL-encoded as a query parameter, not just the basename.';
+        }
         return ['name' => $action, 'description' => $description,
             'inputSchema' => ['type' => 'object', 'properties' => $properties, 'required' => $required, 'additionalProperties' => false],
             'annotations' => ['title' => $action, 'readOnlyHint' => $action === 'get-media',

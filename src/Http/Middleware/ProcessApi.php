@@ -72,8 +72,10 @@ class ProcessApi implements MiddlewareInterface
         if (in_array($controller_class, [\Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Media::class,
             \Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaDownload::class,
             \Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaLinks::class], true)) {
-            // Preserve HTTP methods and PSR-7 multipart uploads; do not parse binary bodies as JSON.
-            return $handler->handle($request);
+            // OAuth authorization has already run. Like the legacy API, bypass the
+            // downstream browser-session CSRF check using an internal GET, retaining
+            // the original operation and all multipart fields/files for the controller.
+            return $handler->handle($request->withAttribute('media_http_method', $request->getMethod())->withMethod('GET'));
         }
 
         //If HTTP method is invalid, return method not allowed

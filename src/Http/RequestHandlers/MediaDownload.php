@@ -14,7 +14,6 @@ final class MediaDownload implements RequestHandlerInterface
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
-        return $request->getMethod() === 'GET' ? $this->media->execute($request, 'download-media') : new \Nyholm\Psr7\Response(405);
+        return $request->getAttribute('media_http_method', $request->getMethod()) === 'GET' ? $this->media->execute($request, 'download-media') : new \Nyholm\Psr7\Response(405);
     }
 }
-

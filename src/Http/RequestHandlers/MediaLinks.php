@@ -14,7 +14,6 @@ final class MediaLinks implements RequestHandlerInterface
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
-        return $this->media->execute($request, match ($request->getMethod()) { 'POST' => 'link-media', 'DELETE' => 'unlink-media', default => '' });
+        return $this->media->execute($request, match ($request->getAttribute('media_http_method', $request->getMethod())) { 'POST' => 'link-media', 'DELETE' => 'unlink-media', default => '' });
     }
 }
-
