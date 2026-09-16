@@ -170,6 +170,11 @@ namespace {
     $input = ['tree' => 'test', 'target-xref' => 'I1', 'target-type' => 'INDI', 'filename' => 'photo.png', 'content-base64' => base64_encode($png)];
     $mcp = (new ServerRequest('GET', ''))->withAttribute('oauth_scopes', ['mcp_write'])->withAttribute('media_mcp', true)->withQueryParams($input);
     check($handler->execute($mcp, 'upload-media')->getStatusCode() === 201, 'MCP upload');
+    $large_mcp = $mcp->withQueryParams(array_replace($input, ['content-base64' => str_repeat('A', MediaInput::maxBase64Length() + 1)]));
+    $large_response = $handler->execute($large_mcp, 'upload-media');
+    $large_result = json_decode((string) $large_response->getBody(), true);
+    check($large_response->getStatusCode() === 413 && $large_result['error'] === 'inline_upload_too_large', 'MCP inline handoff');
+    check($large_result['maxInlineBytes'] === MediaInput::MCP_INLINE_LIMIT && $large_result['multipartEndpoint'] === '/api/media' && $large_result['requiredScope'] === 'api_write', 'MCP inline handoff contract');
     check($handler->execute($mcp->withAttribute('oauth_scopes', ['mcp_read_member']), 'upload-media')->getStatusCode() === 403, 'Read cannot upload');
     check($handler->execute($mcp->withQueryParams(array_replace($input, ['tree' => 'absent'])), 'upload-media')->getStatusCode() === 404, 'Missing tree');
     check($handler->execute($mcp->withQueryParams(array_replace($input, ['target-xref' => 'I999'])), 'upload-media')->getStatusCode() === 404, 'Missing target');

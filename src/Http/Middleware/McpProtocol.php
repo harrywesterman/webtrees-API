@@ -313,12 +313,17 @@ class McpProtocol implements MiddlewareInterface
 
         // In case of an error
         if ($status_code === StatusCodeInterface::STATUS_INTERNAL_SERVER_ERROR) {
-            // Log error
-            CustomModuleLog::addDebugLog($log_module, 'Error in MCP tool result: ' . $reason_phrase . ' ' . $content_stream->__toString());
+            // Never log tool content: it may contain private GEDCOM or base64.
+            CustomModuleLog::addDebugLog($log_module, 'Error in MCP tool result: ' . $status_code . ' ' . $reason_phrase);
 
-            throw new Exception($reason_phrase . ' ' . $content_stream->__toString());
+            throw new Exception($reason_phrase);
         }
         elseif (!in_array($status_code, $success_codes)) {
+            $content_stream->rewind();
+            $error_content = '';
+            while (!$content_stream->eof()) {
+                $error_content .= $content_stream->read(8192);
+            }
             $payload = [
                 'jsonrpc' => self::JSONRPC_VERSION,
                 'id' => $id,
@@ -326,15 +331,19 @@ class McpProtocol implements MiddlewareInterface
                     'content' => [
                         '0' => [
                             'type'=> 'text',
-                            'text'=> $status_code . ': ' . $reason_phrase. ' ' . $content_stream->__toString(),
+                            'text'=> $status_code . ': ' . $reason_phrase . ' ' . $error_content,
                         ],
                     ],
                     'isError' => true,
                 ],
             ];
 
-            // Log MCP error response
-            CustomModuleLog::addDebugLog($log_module, 'MCP error response: ' . $reason_phrase . ' ' . $content_stream->__toString());
+            if (json_validate($error_content)) {
+                $payload['result']['structuredContent'] = json_decode($error_content, true, 512, JSON_THROW_ON_ERROR);
+            }
+
+            // Never log tool content: it may contain private GEDCOM or base64.
+            CustomModuleLog::addDebugLog($log_module, 'MCP error response: ' . $status_code . ' ' . $reason_phrase);
 
             return self::$stream_factory->createStream(json_encode($payload));
         }
@@ -380,8 +389,8 @@ class McpProtocol implements MiddlewareInterface
             // Rewind the destination stream to read its content
             $output_stream->rewind();
 
-            // Log MCP error response
-            CustomModuleLog::addDebugLog($log_module, 'MCP response: ' . $output_stream->read(1024));
+            // Log metadata only; response content can contain private GEDCOM.
+            CustomModuleLog::addDebugLog($log_module, 'MCP response: ' . $status_code . ' ' . $reason_phrase);
 
             $output_stream->rewind();
 

@@ -16,6 +16,10 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\Middleware\McpToolPermission;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Middleware\ProcessApi;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Middleware\ApiPermission;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\WebtreesMcpToolRequestHandlerInterface;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\GetRecord;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ModifyRecord;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaInput;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\ReadAccess;
 use Fisharebest\Webtrees\Registry;
 use Nyholm\Psr7\ServerRequest;
 use Nyholm\Psr7\Response;
@@ -38,6 +42,21 @@ foreach ([Fisharebest\Webtrees\Tree::class => ['mediaFilesystem', 'createRecord'
 }
 check(Fisharebest\Webtrees\Media::RECORD_TYPE === 'OBJE', 'GEDCOM record type');
 new McpToolPermission();
+$combined = (new ServerRequest('GET', ''))->withAttribute('oauth_scopes', ['mcp_read_privacy', 'api_read_member'])
+    ->withAttribute('webtrees_api_transport', ReadAccess::TRANSPORT_MCP);
+check(!ReadAccess::hasMemberScope($combined), 'MCP ignores api_read_member');
+check(ReadAccess::hasMemberScope($combined->withAttribute('oauth_scopes', ['mcp_read_member'])), 'MCP member scope');
+check(ReadAccess::hasMemberScope($combined->withAttribute('webtrees_api_transport', ReadAccess::TRANSPORT_API)), 'API member scope');
+check(!ReadAccess::hasMemberScope($combined->withAttribute('oauth_scopes', ['mcp_read_privacy'])), 'Privacy-only scope');
+check(MediaInput::MCP_INLINE_LIMIT === 512 * 1024, 'Inline MCP limit');
+check(MediaInput::maxBase64Length() === 699052, 'Inline base64 limit');
+$getRecordMethod = (new ReflectionClass(GetRecord::class))->getMethod('getGedcomOfLinkedRecords');
+check($getRecordMethod->getNumberOfParameters() === 5, 'Full linked-record mode');
+$guardMethod = (new ReflectionClass(ModifyRecord::class))->getMethod('removedProtectedLinks');
+$removed = $guardMethod->invoke(null, "0 @I1@ INDI\n1 FAMS @F1@\n1 OBJE @M1@", "0 @I1@ INDI\n1 NAME Test");
+check($removed === ['FAMS @F1@', 'OBJE @M1@'], 'Protected link guard');
+$mcpToolSource = file_get_contents(__DIR__ . '/../src/Http/RequestHandlers/McpTool.php');
+check(str_contains($mcpToolSource, 'ReadAccess::TRANSPORT_MCP'), 'MCP transport marker');
 $seen = [];
 foreach (['UploadMedia', 'GetMedia', 'UpdateMedia', 'LinkMedia', 'UnlinkMedia', 'DeleteMedia'] as $short) {
     $class = 'Jefferson49\\Webtrees\\Module\\WebtreesApi\\Http\\RequestHandlers\\' . $short;
@@ -149,6 +168,18 @@ $body .= str_repeat(' ', $limit - strlen($body));
 check($processMcp->process(new ServerRequest('POST', '/mcp', ['Content-Type' => 'application/json'], $body), $next)->getStatusCode() === 200, 'Exact transport boundary allowed');
 check(str_contains(MediaTools::description('get-media')['description'], '/api/media/download'), 'Download tool path');
 check(str_contains(MediaTools::description('get-media')['description'], 'mcp_read_member'), 'Pending read scope documented');
+check(str_contains(MediaTools::description('upload-media')['description'], '512 KiB'), 'Inline upload limit documented');
+check(str_contains(MediaTools::description('upload-media')['description'], 'multipart REST POST /api/media'), 'Multipart upload documented');
+$rpc413 = json_decode((string) Jefferson49\Webtrees\Module\WebtreesApi\Http\Middleware\McpProtocol::toolResult(
+    1,
+    new Response(413, ['Content-Type' => 'application/json'], json_encode([
+        'error' => 'inline_upload_too_large',
+        'maxInlineBytes' => MediaInput::MCP_INLINE_LIMIT,
+        'multipartEndpoint' => '/api/media',
+        'requiredScope' => 'api_write',
+    ])),
+), true, 512, JSON_THROW_ON_ERROR);
+check(($rpc413['result']['isError'] ?? false) === true && ($rpc413['result']['structuredContent']['maxInlineBytes'] ?? 0) === 512 * 1024, 'JSON-RPC 413 handoff');
 $json = json_decode(file_get_contents(__DIR__ . '/../resources/OpenApi/OpenApi.json'), true, 512, JSON_THROW_ON_ERROR);
 foreach (MediaTools::openApiPaths() as $path => $schema) { check(($json['paths'][$path] ?? null) === $schema, 'Generated OpenAPI matches ' . $path); }
 echo "PASS: $checks real-webtrees API/transport/schema contracts.\n";

@@ -57,7 +57,7 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\Schema\Tree as TreeSchema;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Schema\WebtreesSearchResultItem;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\CheckAccess;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\QueryParamValidator;
-use Jefferson49\Webtrees\Module\WebtreesApi\OAuth2\Repositories\ScopeRepository;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\ReadAccess;
 use Jefferson49\Webtrees\Module\WebtreesApi\WebtreesApi;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
@@ -279,7 +279,6 @@ class SearchGeneral implements WebtreesMcpToolRequestHandlerInterface
      */
     private function searchGeneral(ServerRequestInterface $request): ResponseInterface
     {
-        $scopes                    = Validator::attributes($request)->array('oauth_scopes');
         $tree_name                 = Validator::queryParams($request)->string('tree', '');
         $query                     = Validator::queryParams($request)->string('query', '');
         $search_individuals_param  = Validator::queryParams($request)->string('search_individuals', 'true');
@@ -304,25 +303,16 @@ class SearchGeneral implements WebtreesMcpToolRequestHandlerInterface
             $tree = $this->tree_service->all()[$tree_name];
         }
 
-        // If we search all trees, take a default access level, since we cannot evaluate each tree's privacy and user access level
         if ($tree === null) {
+            // Access is resolved per record below because trees can have different
+            // technical-user access levels and privacy settings.
             $access_level = Auth::PRIV_PRIVATE;
-        }
-        // If less reading scope than member
-        elseif (empty(array_intersect([ScopeRepository::SCOPE_API_READ_MEMBER, ScopeRepository::SCOPE_MCP_READ_MEMBER], $scopes))) {
-
-            // Validate the privacy settings of the tree to assure a minimum privacy level
-            $privacy_validation_response = CheckAccess::checkTreePrivacy($tree);
+        } else {
+            $privacy_validation_response = ReadAccess::validateTree($request, $tree);
             if ($privacy_validation_response->getStatusCode() !== StatusCodeInterface::STATUS_OK) {
                 return $privacy_validation_response;
             }
-
-            // Set record access level to private
-            $access_level = Auth::PRIV_PRIVATE;
-        }
-        else {
-            // Use the access level of the user for the tree
-            $access_level = Authorization::accessLevelForTree($tree);
+            $access_level = ReadAccess::accessLevel($request, $tree);
         }
 
         // Validate query
@@ -449,12 +439,24 @@ class SearchGeneral implements WebtreesMcpToolRequestHandlerInterface
         foreach($all_records_found as $record) {
             /** @var GedcomRecord $record */
 
-            //Add record to search result if validation of record access is successfull
-            $record_access_validation_response = CheckAccess::checkRecordAccess($record, false, $access_level === Auth::PRIV_PRIVATE);
+            $record_tree = $record->tree();
+            $record_access_level = $tree === null && ReadAccess::hasMemberScope($request)
+                ? Authorization::accessLevelForTree($record_tree)
+                : $access_level;
+            $privacy = !ReadAccess::hasMemberScope($request);
+
+            // A privacy-only all-tree search must honor every tree's minimum
+            // privacy policy, not just the access policy of the first tree.
+            if ($privacy && CheckAccess::checkTreePrivacy($record_tree)->getStatusCode() !== StatusCodeInterface::STATUS_OK) {
+                continue;
+            }
+
+            // Add record to search result only when the selected access level can show it.
+            $record_access_validation_response = CheckAccess::checkRecordAccess($record, false, $privacy);
             if ($record_access_validation_response->getStatusCode() === StatusCodeInterface::STATUS_OK) {
 
                 if ($include_record_data) {
-                    $gedcom_data = self::getGedcomData($record, $access_level, $format);
+                    $gedcom_data = self::getGedcomData($record, $record_access_level, $format, ReadAccess::isMcp($request) && ReadAccess::hasMemberScope($request));
                 }
                 else {
                     $gedcom_data = (object) null;
@@ -600,7 +602,7 @@ class SearchGeneral implements WebtreesMcpToolRequestHandlerInterface
      *
      * @return object|string
      */
-    private function getGedcomData(GedcomRecord $record, int $access_level, string $format): object|string {
+    private function getGedcomData(GedcomRecord $record, int $access_level, string $format, bool $include_full_records = false): object|string {
 
         // Create GEDCOM
         $gedcom = Functions::getPrivatizedGedcom($record, $access_level) . "\n";
@@ -610,7 +612,7 @@ class SearchGeneral implements WebtreesMcpToolRequestHandlerInterface
         }
 
         $gedcom  = GetRecord::getGedcomHeader() . $gedcom;
-        $gedcom .= GetRecord::getGedcomOfLinkedRecords($record->tree(), $gedcom, [$record->xref()], $access_level);
+        $gedcom .= GetRecord::getGedcomOfLinkedRecords($record->tree(), $gedcom, [$record->xref()], $access_level, $include_full_records);
         $gedcom .= "0 TRLR\n";
 
         if ($format === GedcomFormatParameter::FORMAT_GEDCOM) {

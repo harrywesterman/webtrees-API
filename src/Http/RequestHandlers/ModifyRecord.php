@@ -272,9 +272,43 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
         $modified_gedcom = preg_replace('/[\r\n]+/', "\n", $modified_gedcom);
         $modified_gedcom = trim($modified_gedcom);
 
+        // MCP clients commonly send back a previously read record. Refuse to
+        // turn an incomplete read into an implicit relationship/media unlink.
+        if ($request->getAttribute('webtrees_api_transport') === 'mcp') {
+            $removed_links = self::removedProtectedLinks($record->gedcom(), $modified_gedcom);
+            if ($removed_links !== []) {
+                return api_response([
+                    'error' => 'protected_links_would_be_removed',
+                    'xref' => $record->xref(),
+                    'removed-links' => $removed_links,
+                    'message' => 'The submitted GEDCOM would remove existing FAMS, FAMC or OBJE links. Use the dedicated relationship or media-link tool for an intentional unlink.',
+                ], StatusCodeInterface::STATUS_CONFLICT);
+            }
+        }
+
         $record->updateRecord($modified_gedcom, false);
 
         return api_response(new XrefItem($record->xref()), StatusCodeInterface::STATUS_OK);
+    }
+
+    /**
+     * Return protected level-one links present before but absent afterwards.
+     * The comparison intentionally ignores ordering and subordinate lines.
+     *
+     * @return array<string>
+     */
+    private static function removedProtectedLinks(string $before, string $after): array
+    {
+        $links = static function (string $gedcom): array {
+            preg_match_all('/^1 (FAMS|FAMC|OBJE) ([^\n]+)$/m', $gedcom, $matches, PREG_SET_ORDER);
+
+            return array_values(array_unique(array_map(
+                static fn (array $match): string => $match[1] . ' ' . $match[2],
+                $matches,
+            )));
+        };
+
+        return array_values(array_diff($links($before), $links($after)));
     }
 
 	/**

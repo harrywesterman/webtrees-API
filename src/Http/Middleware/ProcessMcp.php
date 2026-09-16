@@ -53,7 +53,7 @@ use function Jefferson49\Webtrees\Module\WebtreesApi\Helpers\api_response;
  */
 class ProcessMcp implements MiddlewareInterface
 {
-    /** Enough for a 5 MiB base64 image plus JSON metadata, never unbounded. */
+    /** Bound JSON-RPC transport; image bytes above the inline limit use multipart REST. */
     public static function bodyLimit(): int
     {
         $phpLimit = ini_parse_quantity((string) ini_get('post_max_size'));

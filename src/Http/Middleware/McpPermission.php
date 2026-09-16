@@ -35,6 +35,7 @@ use Fig\Http\Message\StatusCodeInterface;
 use Fisharebest\Webtrees\Registry;
 use Fisharebest\Webtrees\Validator;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\WebtreesMcpToolRequestHandlerInterface;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\ReadAccess;
 use Jefferson49\Webtrees\Module\WebtreesApi\OAuth2\Repositories\ScopeRepository;
 use Jefferson49\Webtrees\Module\WebtreesApi\WebtreesApi;
 use Psr\Http\Message\ResponseInterface;
@@ -78,13 +79,19 @@ class McpPermission implements MiddlewareInterface
         // Check if provided scopes allow MCP access
         if (!empty(array_intersect(ScopeRepository::getMcpScopeIdentifiers($allow_mcp_read_member), $scopes))) {
 
-            // Set MCP tool interface attribute for webtrees
-            $request = $request->withAttribute('mcp_tool_interface', WebtreesMcpToolRequestHandlerInterface::class);
+            // Mark the transport before any downstream access policy runs.
+            $request = $request
+                ->withAttribute('webtrees_api_transport', ReadAccess::TRANSPORT_MCP)
+                ->withAttribute('mcp_tool_interface', WebtreesMcpToolRequestHandlerInterface::class);
 
             //Proceed to the next middleware/request handler
             return $handler->handle($request);
         }
 
-        return api_response('Insufficient permissions: Provided scope(s) insufficient to access MCP.', StatusCodeInterface::STATUS_FORBIDDEN);
+        $message = in_array(ScopeRepository::SCOPE_API_READ_MEMBER, $scopes, true)
+            ? 'Insufficient permissions: api_read_member is REST-only. MCP requires mcp_read_privacy or the explicitly enabled mcp_read_member scope.'
+            : 'Insufficient permissions: MCP requires mcp_read_privacy or mcp_read_member (and mcp_read_member must be enabled in the webtrees API settings).';
+
+        return api_response($message, StatusCodeInterface::STATUS_FORBIDDEN);
     }
 }

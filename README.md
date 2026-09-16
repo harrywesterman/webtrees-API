@@ -60,7 +60,7 @@ This README file contains the following main sections:
 + The module code is based on the PHP OAuth2 implementation of the [League/oauth2-sever](https://oauth2.thephpleague.com/).
 + Access to the webtrees data is be controlled by selecting a webtrees user. All API requests are limited to the webtrees rights, which are assigned to this user.
 + Any write request is rejected if "automatically accept changes" is activated. This ensures that a moderator can always reject unintended changes during a review of pending changes.
-+ All read operations with MCP enforce privacy settings in order to prevent AI access to living individuals' data. If the privacy settings for a tree do not fulfill certain minimum requirements, read access is denied.
++ MCP read access is privacy-filtered by default. The optional `mcp_read_member` scope can be enabled in the module settings for trusted local LLMs; it uses only the assigned technical user's webtrees rights and never inherits `api_read_member` from a combined token.
 + By using OAuth2 scopes, webtrees users, and token expiration times, the access to the API can be controlled on a detailed granularity.
 + It is highly recommended to use HTTPS in order to ensure the encryption of client credentials and access tokens within API requests. HTTPS can be activated by changing "base_url" in the "config.ini.php".
 

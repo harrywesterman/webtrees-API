@@ -43,6 +43,7 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Gedbas\GedbasMc
 use Jefferson49\Webtrees\Module\WebtreesApi\Mcp\Errors;
 use Jefferson49\Webtrees\Module\WebtreesApi\WebtreesApi;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Middleware\McpProtocol;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\ReadAccess;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\AddChildToFamily;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\AddChildToIndividual;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\AddParentToIndividual;
@@ -134,6 +135,7 @@ class McpTool implements RequestHandlerInterface
 
         $request = new ServerRequest(method: 'GET', uri: '')
             ->withAttribute('mcp_tool_interface', $mcp_tool_interface)
+            ->withAttribute('webtrees_api_transport', ReadAccess::TRANSPORT_MCP)
             ->withAttribute('oauth_scopes', $scopes)
             ->withQueryParams($arguments);
 

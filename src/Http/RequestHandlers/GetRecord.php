@@ -57,7 +57,7 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\Schema\Mcp as McpSchema;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Schema\Xref as XrefSchema;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\CheckAccess;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\QueryParamValidator;
-use Jefferson49\Webtrees\Module\WebtreesApi\OAuth2\Repositories\ScopeRepository;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\ReadAccess;
 use Jefferson49\Webtrees\Module\WebtreesApi\WebtreesApi;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
@@ -197,7 +197,6 @@ class GetRecord implements WebtreesMcpToolRequestHandlerInterface
      */
     private function getRecord(ServerRequestInterface $request): ResponseInterface
     {
-        $scopes    = Validator::attributes($request)->array('oauth_scopes');
         $tree_name = Validator::queryParams($request)->string('tree', '');
         $xref      = Validator::queryParams($request)->string('xref', '');
         $format    = Validator::queryParams($request)->string('format', GedcomFormatParameter::DEFAULT_VALUE);
@@ -210,22 +209,12 @@ class GetRecord implements WebtreesMcpToolRequestHandlerInterface
 
         $tree = $this->tree_service->all()[$tree_name];
 
-        // If less reading scope than member
-        if (empty(array_intersect([ScopeRepository::SCOPE_API_READ_MEMBER, ScopeRepository::SCOPE_MCP_READ_MEMBER], $scopes))) {
-
-            // Validate the privacy settings of the tree to assure a minimum privacy level
-            $privacy_validation_response = CheckAccess::checkTreePrivacy($tree);
-            if ($privacy_validation_response->getStatusCode() !== StatusCodeInterface::STATUS_OK) {
-                return $privacy_validation_response;
-            }
-
-            // Set record access level to private
-            $access_level = Auth::PRIV_PRIVATE;
+        // Resolve member access using only the scope belonging to this transport.
+        $privacy_validation_response = ReadAccess::validateTree($request, $tree);
+        if ($privacy_validation_response->getStatusCode() !== StatusCodeInterface::STATUS_OK) {
+            return $privacy_validation_response;
         }
-        else {
-            // Use the access level of the user for the tree
-            $access_level = Authorization::accessLevelForTree($tree);
-        }
+        $access_level = ReadAccess::accessLevel($request, $tree);
 
         // Validate xref
         $xref_validation_response = QueryParamValidator::validateXref($tree, $xref);
@@ -260,7 +249,13 @@ class GetRecord implements WebtreesMcpToolRequestHandlerInterface
         }
 
         $gedcom  = self::getGedcomHeader() . $gedcom;
-        $gedcom .= self::getGedcomOfLinkedRecords($tree, $gedcom, [$record->xref()], $access_level);
+        $gedcom .= self::getGedcomOfLinkedRecords(
+            $tree,
+            $gedcom,
+            [$record->xref()],
+            $access_level,
+            ReadAccess::isMcp($request) && ReadAccess::hasMemberScope($request),
+        );
         $gedcom .= "0 TRLR\n";
 
         if ($format === GedcomFormatParameter::FORMAT_GEDCOM) {
@@ -326,114 +321,115 @@ class GetRecord implements WebtreesMcpToolRequestHandlerInterface
      *
      * @return string
      */
-    public static function getGedcomOfLinkedRecords(Tree $tree, string $gedcom, array $excluded_xrefs = [], int|null $access_level = null): string {
-
+    public static function getGedcomOfLinkedRecords(
+        Tree $tree,
+        string $gedcom,
+        array $excluded_xrefs = [],
+        int|null $access_level = null,
+        bool $include_full_records = false,
+    ): string {
         $access_level ??= Authorization::accessLevelForTree($tree);
+        $seen = array_fill_keys($excluded_xrefs, true);
+
+        return self::collectLinkedRecords($tree, $gedcom, $seen, $access_level, $include_full_records);
+    }
+
+    /**
+     * Recursively serialize only records that the selected access level can show.
+     * Member reads retain complete privatized GEDCOM; privacy-only reads retain
+     * the historical compact linked-person representation.
+     *
+     * @param array<string, bool> $seen
+     */
+    private static function collectLinkedRecords(
+        Tree $tree,
+        string $gedcom,
+        array &$seen,
+        int $access_level,
+        bool $include_full_records,
+    ): string {
         $linked_records_gedcom = '';
         $gedcom_factory = new GedcomRecordFactory();
-        preg_match_all('/@('.Gedcom::REGEX_XREF.')@/', $gedcom, $matches);
+        preg_match_all('/@(' . Gedcom::REGEX_XREF . ')@/', $gedcom, $matches);
 
-        foreach ($matches[1] as $xref) {
+        foreach (array_unique($matches[1] ?? []) as $xref) {
+            if (isset($seen[$xref])) {
+                continue;
+            }
+            $seen[$xref] = true;
 
-            // Do nothing if record is in excluded list or is already included
-            if (   in_array($xref, $excluded_xrefs)
-                OR preg_match('/0 @' . $xref . '@/', $linked_records_gedcom) === 1) {
-
+            $record = $gedcom_factory->make($xref, $tree);
+            if ($record === null) {
                 continue;
             }
 
-            $record = $gedcom_factory->make( $xref, $tree);
+            $privacy = $access_level === Auth::PRIV_PRIVATE;
+            if (CheckAccess::checkRecordAccess($record, false, $privacy)->getStatusCode() !== StatusCodeInterface::STATUS_OK) {
+                continue;
+            }
 
-            if ($record !== null) {
-                $record_tag = $record->tag();
-                $privatized_gedcom = Functions::getPrivatizedGedcom($record, $access_level);
+            $record_tag = $record->tag();
+            $privatized_gedcom = trim(Functions::getPrivatizedGedcom($record, $access_level));
+            if ($privatized_gedcom === '') {
+                continue;
+            }
 
-                switch ($record_tag) {
-                    case 'INDI':
-                        $linked_records_gedcom .= '0 @' . $xref . '@ ' . $record_tag . "\n";
+            if ($include_full_records) {
+                $linked_records_gedcom .= $privatized_gedcom . "\n";
+                $linked_records_gedcom .= self::collectLinkedRecords($tree, $privatized_gedcom, $seen, $access_level, true);
+                continue;
+            }
 
-                        foreach (['NAME'] as $tag) {
-                            preg_match_all('/1 ' . $tag . ' (.*)/', $privatized_gedcom, $matches);
-
-                            foreach ($matches[1] as $payload) {
-                                $linked_records_gedcom .= '1 ' . $tag . ' ' . $payload . "\n";
-                            }
+            switch ($record_tag) {
+                case 'INDI':
+                    $linked_records_gedcom .= "0 @" . $xref . "@ INDI\n";
+                    foreach (['NAME'] as $tag) {
+                        preg_match_all('/^1 ' . $tag . ' (.*)$/m', $privatized_gedcom, $tag_matches);
+                        foreach ($tag_matches[1] ?? [] as $payload) {
+                            $linked_records_gedcom .= '1 ' . $tag . ' ' . $payload . "\n";
                         }
-                        foreach (['BIRT', 'DEAT'] as $tag) {
-                            preg_match_all('/1 ' . $tag . ".*?\n2 DATE ([^\n]*)\n/s", $privatized_gedcom, $matches);
-
-                            foreach ($matches[1] as $payload) {
-                                $linked_records_gedcom .= '1 ' . $tag . "\n2 DATE " . $payload . "\n";
-                            }
+                    }
+                    foreach (['BIRT', 'DEAT'] as $tag) {
+                        preg_match_all('/1 ' . $tag . ".*?\n2 DATE ([^\n]*)\n/s", $privatized_gedcom, $tag_matches);
+                        foreach ($tag_matches[1] ?? [] as $payload) {
+                            $linked_records_gedcom .= '1 ' . $tag . "\n2 DATE " . $payload . "\n";
                         }
-                        break;
-                    case 'FAM':
-                        $linked_records_gedcom .= $privatized_gedcom . "\n";
-                        // Get already records in order to add them to the excluded list
-                        preg_match_all('/0 @('.Gedcom::REGEX_XREF.')@/', $linked_records_gedcom, $matches);
-                        $linked_records_gedcom .= self::getGedcomOfLinkedRecords($tree, $privatized_gedcom,array_merge($excluded_xrefs, [$record->xref()], $matches[1]?? []), $access_level);
-                        break;
-                    case 'NOTE':
-                        preg_match_all('/0 @' . $xref . '@ NOTE (.*)/', $privatized_gedcom, $matches);
-                        $linked_records_gedcom .= $matches[0][0];
-                        break;
-                    case 'OBJE':
-                        $linked_records_gedcom .= '0 @' . $xref . '@ ' . $record_tag . "\n";
-
-                        preg_match_all('/1 FILE (.*)/', $privatized_gedcom, $matches);
-
-                        foreach ($matches[1] as $payload) {
-                            $linked_records_gedcom .= '1 FILE ' . $payload . "\n";
-
-                            preg_match_all('/2 FORM (.*)/', $privatized_gedcom, $matches);
-
-                            foreach ($matches[1] as $payload) {
-                                $linked_records_gedcom .= '2 FORM ' . $payload . "\n";
-                            }
-
-                            preg_match_all('/2 TITL (.*)/', $privatized_gedcom, $matches);
-
-                            foreach ($matches[1] as $payload) {
-                                $linked_records_gedcom .= '2 TITL ' . $payload . "\n";
-                            }
-                        }
-                        break;
-                    case 'SOUR':
-                        $linked_records_gedcom .= '0 @' . $xref . '@ ' . $record_tag . "\n";
-
-                        foreach (['TITL'] as $tag) {
-                            preg_match_all('/1 ' . $tag . ' (.*)/', $privatized_gedcom, $matches);
-
-                            foreach ($matches[1] as $payload) {
-                                $linked_records_gedcom .= '1 ' . $tag . ' ' . $payload . "\n";
-                            }
-                        }
-                        break;
-                    case 'REPO':
-                        $linked_records_gedcom .= '0 @' . $xref . '@ ' . $record_tag . "\n";
-
-                        foreach (['NAME'] as $tag) {
-                            preg_match_all('/1 ' . $tag . ' (.*)/', $privatized_gedcom, $matches);
-
-                            foreach ($matches[1] as $payload) {
-                                $linked_records_gedcom .= '1 ' . $tag . ' ' . $payload . "\n";
-                            }
-                        }
-                        break;
-                    case '_LOC':
-                        $linked_records_gedcom .= '0 @' . $xref . '@ ' . $record_tag . "\n";
-
-                        foreach (['NAME'] as $tag) {
-                            preg_match_all('/1 ' . $tag . ' (.*)/', $privatized_gedcom, $matches);
-
-                            foreach ($matches[1] as $payload) {
-                                $linked_records_gedcom .= '1 ' . $tag . ' ' . $payload . "\n";
-                            }
-                        }
-                        break;
-                    default:
-                        $linked_records_gedcom .= '0 @' . $xref . '@ ' . $record_tag . "\n";
-                }
+                    }
+                    break;
+                case 'FAM':
+                    $linked_records_gedcom .= $privatized_gedcom . "\n";
+                    $linked_records_gedcom .= self::collectLinkedRecords($tree, $privatized_gedcom, $seen, $access_level, false);
+                    break;
+                case 'NOTE':
+                    preg_match('/^0 @' . preg_quote($xref, '/') . '@ NOTE .*$/m', $privatized_gedcom, $note_match);
+                    if (isset($note_match[0])) {
+                        $linked_records_gedcom .= $note_match[0] . "\n";
+                    }
+                    break;
+                case 'OBJE':
+                    $linked_records_gedcom .= "0 @" . $xref . "@ OBJE\n";
+                    preg_match_all('/^1 FILE .*?(?=\n1 |\z)/ms', $privatized_gedcom, $file_matches);
+                    foreach ($file_matches[0] ?? [] as $file) {
+                        $linked_records_gedcom .= trim($file) . "\n";
+                    }
+                    break;
+                case 'SOUR':
+                    $linked_records_gedcom .= "0 @" . $xref . "@ SOUR\n";
+                    preg_match_all('/^1 TITL .*$/m', $privatized_gedcom, $title_matches);
+                    foreach ($title_matches[0] ?? [] as $title) {
+                        $linked_records_gedcom .= $title . "\n";
+                    }
+                    break;
+                case 'REPO':
+                case '_LOC':
+                    $linked_records_gedcom .= '0 @' . $xref . '@ ' . $record_tag . "\n";
+                    preg_match_all('/^1 NAME .*$/m', $privatized_gedcom, $name_matches);
+                    foreach ($name_matches[0] ?? [] as $name) {
+                        $linked_records_gedcom .= $name . "\n";
+                    }
+                    break;
+                default:
+                    $linked_records_gedcom .= '0 @' . $xref . '@ ' . $record_tag . "\n";
             }
         }
 

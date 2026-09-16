@@ -38,6 +38,7 @@ use Fisharebest\Webtrees\Webtrees;
 use Fig\Http\Message\RequestMethodInterface;
 use Fig\Http\Message\StatusCodeInterface;
 use Jefferson49\Webtrees\Helpers\Functions;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\ReadAccess;
 use OpenApi\Annotations\Operation;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -66,6 +67,7 @@ class ProcessApi implements MiddlewareInterface
      */
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
+        $request = $request->withAttribute('webtrees_api_transport', ReadAccess::TRANSPORT_API);
         $route            = Validator::attributes($request)->route();
         $controller_class = version_compare(Webtrees::VERSION, '2.3.0', '>=') ? $route->controller : $route->handler;
 

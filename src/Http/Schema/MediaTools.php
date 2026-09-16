@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Jefferson49\Webtrees\Module\WebtreesApi\Http\Schema;
 
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaInput;
+
 final class MediaTools
 {
     public const array ACTIONS = ['upload-media', 'get-media', 'update-media', 'link-media', 'unlink-media', 'delete-media'];
@@ -68,11 +70,11 @@ final class MediaTools
             unset($properties['xref']);
             $required = ['tree', 'target-xref', 'target-type', 'filename', 'content-base64'];
             $properties['filename'] = ['type' => 'string', 'maxLength' => 180, 'description' => 'Basename including JPEG/PNG/GIF/WebP extension, never a path.'];
-            $properties['content-base64'] = ['type' => 'string', 'maxLength' => 6990508,
-                'description' => 'Actual local file bytes encoded as canonical base64, at most 5 MiB decoded, subject to the server PHP post_max_size transport limit (base64 adds about one third). HTTP 413 reports maxBodyBytes; reduce the image or ask the administrator to raise that limit. Use a file/terminal tool to encode it; never invent bytes. No data URL prefix or whitespace.'];
+            $properties['content-base64'] = ['type' => 'string', 'maxLength' => MediaInput::maxBase64Length(),
+                'description' => 'Legacy inline transport for actual local image bytes encoded as canonical base64, at most 512 KiB decoded. For larger files, use authenticated multipart REST POST /api/media with api_write. Use a file/terminal tool to encode it; never invent bytes. No data URL prefix or whitespace.'];
         }
         $description = match ($action) {
-            'upload-media' => 'Upload a local image and link it to a verified INDI/FAM/SOUR. First get-trees and get-record. Read and base64-encode the actual file using your client file tools; the remote server cannot open local paths. If the client cannot safely pass the base64 payload, use authenticated multipart REST POST /media (up to 20 MiB) from a local script. Never put secrets or base64 in query URLs. On success retain the returned media XREF and do not upload again: BOTH record and link await moderator approval.',
+            'upload-media' => 'Upload a local image and link it to a verified INDI/FAM/SOUR. First get-trees and get-record. The remote server cannot open local paths. Use inline base64 only up to 512 KiB decoded; for larger files, send the local bytes with authenticated multipart REST POST /api/media (up to 20 MiB, api_write) from a local script. Never put secrets or base64 in query URLs. On success retain the returned media XREF and do not upload again: BOTH record and link await moderator approval.',
             'get-media' => 'Read visible media filenames, webtrees page URL and pending status. For bytes use authenticated REST GET /media/download with tree, xref and filename; the webtrees page URL is not a public file URL.',
             'update-media' => 'Submit a media metadata change. Omitted fields remain unchanged; empty fields clear one value. Multiple titles/files or notes may require editing in webtrees. Await moderator approval before another write.',
             'link-media' => 'Link approved media to an existing verified person, family or source at record level. An existing link is a no-op only when both records have no pending changes. Pending records return 409 even for a repeated link; await moderator approval.',

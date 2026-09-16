@@ -199,6 +199,15 @@ class Media implements RequestHandlerInterface
             if (!is_string($encoded)) {
                 throw new DomainException('content-base64 is required. Read and encode the local file using client file tools.', 400);
             }
+            if (strlen($encoded) > MediaInput::maxBase64Length()) {
+                return api_response([
+                    'error' => 'inline_upload_too_large',
+                    'maxInlineBytes' => MediaInput::MCP_INLINE_LIMIT,
+                    'multipartEndpoint' => '/api/media',
+                    'requiredScope' => Scopes::SCOPE_API_WRITE,
+                    'message' => 'Send the local image as multipart/form-data to POST /api/media. Do not place base64 or secrets in the MCP request or a URL.',
+                ], 413);
+            }
             $name = MediaInput::filename(MediaInput::text($input, 'filename'));
             $bytes = MediaInput::base64($encoded);
         } else {
@@ -218,7 +227,7 @@ class Media implements RequestHandlerInterface
                 $bytes .= $part;
             }
         }
-        $mime = MediaInput::image($bytes, $name, $mcp ? MediaInput::MCP_LIMIT : MediaInput::REST_LIMIT);
+        $mime = MediaInput::image($bytes, $name, $mcp ? MediaInput::MCP_INLINE_LIMIT : MediaInput::REST_LIMIT);
         // A random directory preserves the readable basename without ever replacing an existing file.
         $path = 'api-media/' . bin2hex(random_bytes(16)) . '/' . $name;
         $fs = $tree->mediaFilesystem();
