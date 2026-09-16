@@ -381,7 +381,7 @@ if (version_compare(Webtrees::VERSION, '2.3', '>=')) {
 							data-wt-href="<?= e(route(CreateTokenModal::class, [
 								'client_identifier'    => $client->getIdentifier(),
 								'scope_identifiers'    => $client_scopes,
-								'token_scopes'         => [],
+								'token_scopes'         => array_combine($client_scopes, $client->getScopes()),
 								'expiration_intervals' => AccessTokenRepository::getExpirationIntervals(),
 								'expiration_interval'  => AccessTokenRepository::DEFAULT_EXPIRATION_INTERVAL,
 							]

@@ -71,7 +71,12 @@ class CreateTokenAction implements RequestHandlerInterface
         $webtrees_api = Registry::container()->get(WebtreesApi::class);
         $client = $client_repository->getClientEntity($client_identifier);
 
-        if (!$client->hasScopes($scope_repository->getScopesForIdentifiers($token_scopes))) {
+        if (empty($token_scopes)) {
+            $error = true;
+            $message = I18N::translate('Select at least one scope for the access token');
+            $long_token = '';
+        }
+        elseif (!$client->hasScopes($scope_repository->getScopesForIdentifiers($token_scopes))) {
             $error = true;
             $message = I18N::translate('The client does not have the requested scopes');
             $long_token = '';

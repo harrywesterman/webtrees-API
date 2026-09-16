@@ -57,6 +57,11 @@ $removed = $guardMethod->invoke(null, "0 @I1@ INDI\n1 FAMS @F1@\n1 OBJE @M1@", "
 check($removed === ['FAMS @F1@', 'OBJE @M1@'], 'Protected link guard');
 $mcpToolSource = file_get_contents(__DIR__ . '/../src/Http/RequestHandlers/McpTool.php');
 check(str_contains($mcpToolSource, 'ReadAccess::TRANSPORT_MCP'), 'MCP transport marker');
+
+$settingsSource = file_get_contents(__DIR__ . '/../resources/views/settings.phtml');
+check(str_contains($settingsSource, "'token_scopes'         => array_combine($client_scopes, $client->getScopes()),"), 'Token form preselects client scopes');
+$tokenActionSource = file_get_contents(__DIR__ . '/../src/Http/RequestHandlers/CreateTokenAction.php');
+check(str_contains($tokenActionSource, 'if (empty($token_scopes))'), 'Token creation rejects empty scopes');
 $seen = [];
 foreach (['UploadMedia', 'GetMedia', 'UpdateMedia', 'LinkMedia', 'UnlinkMedia', 'DeleteMedia'] as $short) {
     $class = 'Jefferson49\\Webtrees\\Module\\WebtreesApi\\Http\\RequestHandlers\\' . $short;

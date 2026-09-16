@@ -27,11 +27,15 @@ msgstr "Nieuwe private/publieke sleutels aanmaken"
 msgid "The client does not have the requested scopes"
 msgstr "De client heeft niet de gevraagde scopes"
 
-#: src/Http/RequestHandlers/CreateTokenAction.php:94
+#: src/Http/RequestHandlers/CreateTokenAction.php:76
+msgid "Select at least one scope for the access token"
+msgstr "Selecteer ten minste één machtiging voor het toegangstoken"
+
+#: src/Http/RequestHandlers/CreateTokenAction.php:100
 msgid "Sucessfully created new access token."
 msgstr "Nieuw toegangstoken aangemaakt."
 
-#: src/Http/RequestHandlers/CreateTokenAction.php:102
+#: src/Http/RequestHandlers/CreateTokenAction.php:108
 msgid "Create Access Token"
 msgstr "Toegangstoken aanmaken"
 
