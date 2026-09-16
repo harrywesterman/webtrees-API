@@ -31,8 +31,10 @@ declare(strict_types=1);
 
 namespace Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers;
 
+use Fisharebest\Webtrees\Registry;
 use Fisharebest\Webtrees\Validator;
 use Jefferson49\Webtrees\Module\WebtreesApi\WebtreesApi;
+use Jefferson49\Webtrees\Module\WebtreesApi\OAuth2\Repositories\ScopeRepository;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
@@ -57,9 +59,12 @@ class CreateTokenModal implements RequestHandlerInterface
         $clients              = Validator::queryParams($request)->array('clients');
         $client_identifier    = Validator::queryParams($request)->string('client_identifier', '');
         $scope_identifiers    = Validator::queryParams($request)->array('scope_identifiers');
-        $token_scopes         = Validator::queryParams($request)->array('token_scopes');
+        $token_scope_identifiers = Validator::queryParams($request)->array('token_scopes');
         $expiration_intervals = Validator::queryParams($request)->array('expiration_intervals');
         $expiration_interval  = Validator::queryParams($request)->string('expiration_interval', '');
+
+        $scope_repository = Registry::container()->get(ScopeRepository::class);
+        $token_scopes = $scope_repository->getScopesForIdentifiers($token_scope_identifiers);
 
         return response(
             view(WebtreesApi::viewsNamespace() . '::modals/create-token', [

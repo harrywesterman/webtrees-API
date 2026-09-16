@@ -59,7 +59,10 @@ $mcpToolSource = file_get_contents(__DIR__ . '/../src/Http/RequestHandlers/McpTo
 check(str_contains($mcpToolSource, 'ReadAccess::TRANSPORT_MCP'), 'MCP transport marker');
 
 $settingsSource = file_get_contents(__DIR__ . '/../resources/views/settings.phtml');
-check(str_contains($settingsSource, "'token_scopes'         => array_combine($client_scopes, $client->getScopes()),"), 'Token form preselects client scopes');
+check(str_contains($settingsSource, "'token_scopes'         => $client_scopes,"), 'Token form passes client scope identifiers');
+$tokenModalSource = file_get_contents(__DIR__ . '/../src/Http/RequestHandlers/CreateTokenModal.php');
+check(str_contains($tokenModalSource, '$token_scope_identifiers'), 'Token modal reads scope identifiers');
+check(str_contains($tokenModalSource, 'getScopesForIdentifiers($token_scope_identifiers)'), 'Token modal resolves scope identifiers');
 $tokenActionSource = file_get_contents(__DIR__ . '/../src/Http/RequestHandlers/CreateTokenAction.php');
 check(str_contains($tokenActionSource, 'if (empty($token_scopes))'), 'Token creation rejects empty scopes');
 $seen = [];
