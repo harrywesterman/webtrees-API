@@ -133,11 +133,16 @@ class McpTool implements RequestHandlerInterface
 
         $id = ($string_id !== (string) McpProtocol::MCP_ID_DEFAULT) ? $string_id : $int_id;
 
+        $original = $request;
         $request = new ServerRequest(method: 'GET', uri: '')
             ->withAttribute('mcp_tool_interface', $mcp_tool_interface)
             ->withAttribute('webtrees_api_transport', ReadAccess::TRANSPORT_MCP)
             ->withAttribute('oauth_scopes', $scopes)
             ->withQueryParams($arguments);
+        // Preserve only authenticated identity, never values supplied in tool arguments.
+        foreach (['oauth_client_id', 'oauth_user_id', 'oauth_access_token_id'] as $attribute) {
+            $request = $request->withAttribute($attribute, $original->getAttribute($attribute));
+        }
 
         if ($mcp_tool_interface === WebtreesMcpToolRequestHandlerInterface::class) {
             switch ($tool_name) {
@@ -148,12 +153,13 @@ class McpTool implements RequestHandlerInterface
                     $handler = Registry::container()->get(ModifyRecord::class);
                     return $this->handleMcpTool($id, $request, $handler);
                 case 'upload-media':
+                case 'upload-media-chunk':
                 case 'get-media':
                 case 'update-media':
                 case 'link-media':
                 case 'unlink-media':
                 case 'delete-media':
-                    $media_handlers = ['upload-media' => UploadMedia::class, 'get-media' => GetMedia::class,
+                    $media_handlers = ['upload-media' => UploadMedia::class, 'upload-media-chunk' => UploadMediaChunk::class, 'get-media' => GetMedia::class,
                         'update-media' => UpdateMedia::class, 'link-media' => LinkMedia::class,
                         'unlink-media' => UnlinkMedia::class, 'delete-media' => DeleteMedia::class];
                     return $this->handleMcpTool($id, $request, Registry::container()->get($media_handlers[$tool_name]));

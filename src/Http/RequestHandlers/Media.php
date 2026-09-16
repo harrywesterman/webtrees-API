@@ -194,7 +194,8 @@ class Media implements RequestHandlerInterface
     {
         $target = $this->target($tree, $input);
         $this->editable($target);
-        if ($mcp) {
+        $chunkFile = $mcp ? $request->getAttribute('media_chunk_file') : null;
+        if ($mcp && !$chunkFile instanceof UploadedFileInterface) {
             $encoded = $input['content-base64'] ?? null;
             if (!is_string($encoded)) {
                 throw new DomainException('content-base64 is required. Read and encode the local file using client file tools.', 400);
@@ -211,7 +212,7 @@ class Media implements RequestHandlerInterface
             $name = MediaInput::filename(MediaInput::text($input, 'filename'));
             $bytes = MediaInput::base64($encoded);
         } else {
-            $file = $request->getUploadedFiles()['file'] ?? null;
+            $file = $chunkFile ?? ($request->getUploadedFiles()['file'] ?? null);
             if ($file instanceof UploadedFileInterface && in_array($file->getError(), [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)) {
                 throw new DomainException('File exceeds the PHP upload limit; reduce it or contact the administrator.', 413);
             }
@@ -227,7 +228,7 @@ class Media implements RequestHandlerInterface
                 $bytes .= $part;
             }
         }
-        $mime = MediaInput::image($bytes, $name, $mcp ? MediaInput::MCP_INLINE_LIMIT : MediaInput::REST_LIMIT);
+        $mime = MediaInput::image($bytes, $name, $mcp && !$chunkFile instanceof UploadedFileInterface ? MediaInput::MCP_INLINE_LIMIT : MediaInput::REST_LIMIT);
         // A random directory preserves the readable basename without ever replacing an existing file.
         $path = 'api-media/' . bin2hex(random_bytes(16)) . '/' . $name;
         $fs = $tree->mediaFilesystem();

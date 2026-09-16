@@ -2,11 +2,17 @@
 
 This fork adds image uploads to the existing webtrees module. Deployment and live acceptance results are recorded separately from this client guide.
 
+**Local MCP clients:** use the [local file bridge](mcp-local-upload.md) to upload
+images up to 20 MiB with one `upload-media` call using `local-path`. The bridge
+transfers chunks entirely over MCP with `mcp_write`; it does not use REST or
+require `api_write`. The inline-base64 and multipart instructions below describe
+direct remote MCP and independent REST clients respectively.
+
 ## Contract
 
 | Operation | REST | MCP tool |
 | --- | --- | --- |
-| Upload and link | `POST /media` (multipart) | `upload-media` (inline base64 for small files; multipart REST for larger files) |
+| Upload and link | `POST /media` (multipart) | `upload-media` via local MCP bridge (all files; inline base64 is legacy for small files) |
 | Visible metadata | `GET /media?tree=…&xref=…` | `get-media` |
 | Change metadata | `PUT /media` (JSON) | `update-media` |
 | Link approved media | `POST /media/links` (JSON) | `link-media` |
@@ -18,9 +24,9 @@ Paths are relative to the module's API base URL shown in its control panel. The 
 
 All writes require `api_write` or `mcp_write`, an editor technical user, and automatic acceptance disabled. Reads require the respective `*_read_member` or `*_read_privacy` scope. Privacy-only reads check tree and record privacy and filter individual facts. Read scopes never authorize writes. Existing token issuance remains unchanged.
 
-Upload fields: `tree`, `target-xref`, `target-type` (`INDI`, `FAM`, `SOUR`), and optional `title`, `note`, `date`. REST takes a multipart `file`; MCP inline transport takes `filename` and `content-base64` only for files up to 512 KiB decoded. For larger files, use authenticated multipart `POST /api/media` with `api_write`; do not route the bytes through MCP JSON. Target XREFs have no `@` signs. A target with pending changes must be reviewed first.
+Upload fields: `tree`, `target-xref`, `target-type` (`INDI`, `FAM`, `SOUR`), and optional `title`, `note`, `date`. The local MCP bridge takes `local-path` and transfers every file, including large files, in bounded MCP chunks with `mcp_write`. Direct MCP clients may use the legacy inline `filename`/`content-base64` mode up to 512 KiB decoded. Authenticated multipart `POST /api/media` remains a compatibility fallback only. Target XREFs have no `@` signs. A target with pending changes must be reviewed first.
 
-JPEG, PNG, GIF and WebP are supported. Content must decode as an image and match its extension. PDF, SVG and TIFF are rejected in this version. Limits: 512 KiB decoded inline via MCP, 20 MiB via REST, 40 megapixels, available decoding memory, and the host's PHP upload/post limits. Base64 must be canonical with no whitespace or data-URL prefix. It is never accepted in a REST upload URL.
+JPEG, PNG, GIF and WebP are supported. Content must decode as an image and match its extension. PDF, SVG and TIFF are rejected in this version. Limits: 512 KiB decoded inline via MCP, 20 MiB through the local MCP bridge, 40 megapixels, available decoding memory, and the host's PHP upload/post limits. Base64 must be canonical with no whitespace or data-URL prefix. It is never accepted in a REST upload URL.
 
 Files use `api-media/<random-id>/<normalized-basename>` inside the tree media filesystem. `FILE` stores that relative path, not a server path or the tree media-directory prefix. Repeated basenames get separate paths; uploads are not idempotent. Titles use `OBJE:FILE:TITL`, notes use `OBJE:NOTE`, dates use the webtrees-supported custom `OBJE:_DATE` field. Date text is retained as provided; it is not normalized to a calendar date.
 
@@ -66,9 +72,9 @@ Reconnect the MCP server after an update so the client refreshes `tools/list`. E
 
 Suggested instruction for either agent:
 
-> For webtrees images, use the media tools, not add-unlinked-record or modify-record. First identify the exact tree and verify the intended person/family/source. Read the actual local image with a file or terminal tool. Use upload-media only for inline payloads up to 512 KiB; for larger files use a local multipart REST script with a separately authorized api_write token. Never invent bytes or print secrets/base64 into chat. Call the upload once, retain its XREF, and report the pending approval of both media and link. Do not silently resize or recompress the original. Stop on pending changes and let a moderator review them.
+> For webtrees images, use the media tools, not add-unlinked-record or modify-record. First identify the exact tree and verify the intended person/family/source. Read the actual local image with a file or terminal tool. Use the local MCP bridge with `local-path` for every normal upload; inline base64 is only a small-file compatibility mode. Never invent bytes or print secrets/base64 into chat. Call the upload once, retain its XREF, and report the pending approval of both media and link. Do not silently resize or recompress the original. Stop on pending changes and let a moderator review them.
 
-Large base64 strings may exceed an AI client's practical tool limits. Transfer bytes programmatically with multipart REST, not manual copying through chat. If an inline MCP upload is rejected, follow the returned `multipartEndpoint`, `maxInlineBytes` and `requiredScope` fields.
+Large base64 strings may exceed an AI client's practical tool limits. Transfer bytes programmatically with the local MCP bridge, not manual copying through chat. If an inline MCP upload is rejected, use the bridge; the returned multipart fields describe the compatibility fallback.
 
 Example `tools/call` structure (the base64 placeholder must be replaced programmatically with actual file contents):
 
@@ -117,7 +123,7 @@ Use an HTTPS API URL. The example needs the optional `requests` package and an e
 
 1. Geef Codex of OpenCode toegang tot het lokale afbeeldingsbestand en verbind de bestaande MCP-server met een token uit webtrees.
 2. Laat de AI eerst de stamboomnaam en het doelrecord controleren. Een foto kan aan een persoon, familie of bron worden gekoppeld.
-3. Laat `upload-media` alleen kleine bestanden inline versturen. Gebruik voor grote bestanden een lokaal script met multipart REST, mits het token ook `api_write` heeft; een lokaal pad alleen is onvoldoende.
+3. Laat `upload-media` kleine bestanden inline of alle bestanden via de lokale MCP-bridge versturen. Gebruik multipart REST alleen als compatibiliteitsfallback; daarvoor is `api_write` nodig.
 4. De AI geeft het media-XREF terug en meldt dat zowel het mediarecord als de koppeling op goedkeuring wachten. Keur beide wijzigingen in webtrees goed voordat je verder bewerkt.
 5. `get-media` toont alleen toegankelijke bestandsnamen en metadata. Wijzigen bewaart weggelaten velden; ontkoppelen raakt alleen de opgegeven koppeling. Verwijderen bewaart het bestand zodat afwijzen van de wijziging of gedeeld gebruik geen afbeelding kwijtraakt.
 
@@ -136,7 +142,7 @@ The first suite uses real SQLite transactions, PSR-7 and Flysystem with webtrees
 ## Aanvulling na live-acceptatietest (13 september 2026)
 
 - MCP pending media teruglezen vereist `mcp_read_member`, naast de webtrees-rechten van de technische gebruiker. `mcp_write` en REST-scope `api_read_member` geven geen MCP-member-leesrecht. Met alleen `mcp_read_privacy` kan een nieuwe XREF tot goedkeuring 404 geven: bewaar de XREF en upload niet opnieuw. Laat een beheerder zo nodig een passende token uitgeven.
-- 512 KiB is de maximale inline MCP-afbeelding. Grotere bestanden gebruiken multipart REST tot 20 MiB. MCP accepteert daarnaast maximaal 8 MiB JSON, verder begrensd door PHP `post_max_size`; een te grote inline-upload geeft HTTP 413 met een gestructureerde multipart-handoff. Een proxy/webserver kan eerder afwijzen.
+- 512 KiB is de maximale inline MCP-afbeelding. De lokale MCP-bridge verstuurt grotere bestanden in chunks tot 20 MiB via MCP. MCP accepteert daarnaast maximaal 8 MiB JSON, verder begrensd door PHP `post_max_size`; een te grote inline-upload geeft HTTP 413 met een gestructureerde handoff naar de bridge. Een proxy/webserver kan eerder afwijzen.
 - Als de webserver een body afkapt maar de oorspronkelijke `Content-Length` bewaart, herkent de module dit verschil en geeft hij eveneens 413 met `receivedBodyBytes`; een afgekapt JSON-body eindigt daarmee niet meer als een misleidende JSON-RPC parse error.
 - Als een gedeelde host ook de zichtbare lengte aanpast, herkent de module grote JSON-bodies zonder afsluitende `}` of `]` als afgekapt en geeft hij 413. Een opzettelijk ongeldige grote JSON-request kan daardoor dezelfde 413 krijgen; dat voorkomt een misleidende parsefout.
 - Voor inline MCP-upload is voldoende `post_max_size` nodig voor maximaal 512 KiB plus JSON-overhead. Voor 20 MiB REST-upload: `upload_max_filesize` minstens 20M en `post_max_size` groter dan 20M, bijvoorbeeld 24M wegens multipart-overhead. Dit zijn beheerinstructies; de code verandert geen serverconfiguratie.

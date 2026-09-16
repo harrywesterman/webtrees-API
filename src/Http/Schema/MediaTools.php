@@ -8,7 +8,7 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaInput;
 
 final class MediaTools
 {
-    public const array ACTIONS = ['upload-media', 'get-media', 'update-media', 'link-media', 'unlink-media', 'delete-media'];
+    public const array ACTIONS = ['upload-media', 'get-media', 'update-media', 'link-media', 'unlink-media', 'delete-media', 'upload-media-chunk'];
 
     /** Shared source for the checked-in OpenAPI and runtime Swagger regeneration. */
     public static function openApiPaths(): array
@@ -51,6 +51,26 @@ final class MediaTools
 
     public static function description(string $action): array
     {
+        if ($action === 'upload-media-chunk') {
+            $tool = self::description('upload-media');
+            $tool['name'] = $action;
+            $tool['description'] = 'Upload ordered local image chunks using mcp_write, up to 256 KiB decoded per chunk and 20 MiB total. Send identical metadata on every call. upload-id is 8 hex Unix timestamp seconds followed by 24 random hex digits; start at offset 0. New IDs must be less than one hour old and no more than 300 seconds in the future. next-offset acknowledges stored bytes. final=true on the last chunk verifies the full SHA-256 then creates pending media and target link. Exact chunk retries and exact final replay are safe. Sessions expire one hour after the ID timestamp; final receipts and uncertain commits expire after 24 hours. Expired IDs cannot be reused. Uncertain commits return 409: verify with an administrator, never retry with a new ID. Never invent bytes or expose tokens/base64 in URLs.';
+            $tool['inputSchema']['properties'] += [
+                'upload-id' => ['type' => 'string', 'pattern' => '^[a-fA-F0-9]{32}$', 'description' => '8 hex Unix timestamp seconds followed by 24 random hex digits.'],
+                'offset' => ['type' => 'integer', 'minimum' => 0, 'maximum' => MediaInput::REST_LIMIT],
+                'total-bytes' => ['type' => 'integer', 'minimum' => 1, 'maximum' => MediaInput::REST_LIMIT],
+                'sha256' => ['type' => 'string', 'pattern' => '^[a-fA-F0-9]{64}$'],
+                'final' => ['type' => 'boolean'],
+            ];
+            $tool['inputSchema']['properties']['tree']['maxLength'] = 255;
+            $tool['inputSchema']['properties']['target-xref']['pattern'] = '^[A-Za-z0-9_:-]{1,64}$';
+            $tool['inputSchema']['properties']['content-base64'] = ['type' => 'string', 'maxLength' => 349528,
+                'description' => 'Canonical base64, at most 262144 decoded bytes. Empty allowed only for finalization at total-bytes.'];
+            $tool['inputSchema']['required'] = array_merge($tool['inputSchema']['required'], ['upload-id', 'offset', 'total-bytes', 'sha256', 'final']);
+            $tool['annotations']['title'] = $action;
+            $tool['annotations']['idempotentHint'] = true;
+            return $tool;
+        }
         $properties = ['tree' => ['type' => 'string', 'description' => 'Exact tree name from get-trees.'],
             'xref' => ['type' => 'string', 'description' => 'Existing OBJE media XREF, without @ signs.']];
         $required = ['tree', 'xref'];
@@ -71,10 +91,10 @@ final class MediaTools
             $required = ['tree', 'target-xref', 'target-type', 'filename', 'content-base64'];
             $properties['filename'] = ['type' => 'string', 'maxLength' => 180, 'description' => 'Basename including JPEG/PNG/GIF/WebP extension, never a path.'];
             $properties['content-base64'] = ['type' => 'string', 'maxLength' => MediaInput::maxBase64Length(),
-                'description' => 'Legacy inline transport for actual local image bytes encoded as canonical base64, at most 512 KiB decoded. For larger files, use authenticated multipart REST POST /api/media with api_write. Use a file/terminal tool to encode it; never invent bytes. No data URL prefix or whitespace.'];
+                'description' => 'Legacy inline transport for actual local image bytes encoded as canonical base64, at most 512 KiB decoded. For larger files use the local MCP bridge with local-path (up to 20 MiB, mcp_write), which transfers every chunk through MCP. Authenticated multipart REST POST /api/media with api_write remains a compatibility fallback only. Use a file/terminal tool to encode it; never invent bytes. No data URL prefix or whitespace.'];
         }
         $description = match ($action) {
-            'upload-media' => 'Upload a local image and link it to a verified INDI/FAM/SOUR. First get-trees and get-record. The remote server cannot open local paths. Use inline base64 only up to 512 KiB decoded; for larger files, send the local bytes with authenticated multipart REST POST /api/media (up to 20 MiB, api_write) from a local script. Never put secrets or base64 in query URLs. On success retain the returned media XREF and do not upload again: BOTH record and link await moderator approval.',
+            'upload-media' => 'Upload a local image and link it to a verified INDI/FAM/SOUR. First get-trees and get-record. The remote server cannot open local paths, so the local MCP bridge is the standard path for every image: it accepts local-path up to 20 MiB and transfers bounded chunks through MCP with mcp_write. Inline base64 is legacy and only up to 512 KiB decoded; multipart REST is a compatibility fallback, not required for MCP uploads. Never put secrets or base64 in query URLs. On success retain the returned media XREF and do not upload again: BOTH record and link await moderator approval.',
             'get-media' => 'Read visible media filenames, webtrees page URL and pending status. For bytes use authenticated REST GET /media/download with tree, xref and filename; the webtrees page URL is not a public file URL.',
             'update-media' => 'Submit a media metadata change. Omitted fields remain unchanged; empty fields clear one value. Multiple titles/files or notes may require editing in webtrees. Await moderator approval before another write.',
             'link-media' => 'Link approved media to an existing verified person, family or source at record level. An existing link is a no-op only when both records have no pending changes. Pending records return 409 even for a repeated link; await moderator approval.',

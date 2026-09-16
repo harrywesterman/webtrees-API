@@ -246,6 +246,7 @@ namespace {
         check($tool['name'] === $action && strlen($tool['description']) > 100, 'Tool description');
     }
     check(isset(MediaTools::openApiPaths()['/media']['post']['requestBody']['content']['multipart/form-data']), 'Swagger multipart');
+    require __DIR__ . '/media-chunk-handler.php';
     foreach ($fs->listContents('', true)->filter(fn ($i) => $i->isFile()) as $item) { $fs->delete($item->path()); }
     $fs->deleteDirectory('api-media'); rmdir($dir);
     echo "PASS: $checks checks (record/access doubles; real SQLite, PSR-7, Flysystem).\n";

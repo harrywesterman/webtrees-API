@@ -53,7 +53,7 @@ use function Jefferson49\Webtrees\Module\WebtreesApi\Helpers\api_response;
  */
 class ProcessMcp implements MiddlewareInterface
 {
-    /** Bound JSON-RPC transport; image bytes above the inline limit use multipart REST. */
+    /** Bound JSON-RPC transport; image bytes above the inline limit use the local MCP bridge. */
     public static function bodyLimit(): int
     {
         $phpLimit = ini_parse_quantity((string) ini_get('post_max_size'));
@@ -129,7 +129,7 @@ class ProcessMcp implements MiddlewareInterface
 						'jsonrpc' => McpProtocol::JSONRPC_VERSION, 'id' => McpProtocol::MCP_ID_DEFAULT,
 						'error' => [
 							'code' => -32000, 'message' => 'Request body too large',
-							'data' => ['receivedBodyBytes' => strlen($raw_body), 'hint' => 'The upstream server truncated the JSON body. Reduce the image or use multipart REST POST /api/media.'],
+							'data' => ['receivedBodyBytes' => strlen($raw_body), 'hint' => 'The upstream server truncated the JSON body. Reduce the image or use the local MCP bridge with local-path.'],
 						],
 					];
 					return api_response($payload, StatusCodeInterface::STATUS_PAYLOAD_TOO_LARGE);

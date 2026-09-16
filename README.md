@@ -254,6 +254,11 @@ The API is described in a JSON file, which is compliant to the JSON format of th
 The OpenAPI Description is available in the [GitHub repository](https://github.com/Jefferson49/webtrees-API/blob/master/resources/OpenApi/OpenApi.json) and also included within the releases of the custom module in the following folder: \resources\OpenApi\OpenApi.json
 
 ### MCP
+For local image uploads up to 20 MiB entirely through MCP, use the
+[local file bridge](resources/mcp-local-upload.md). Its `upload-media` tool takes
+`local-path`, transfers chunks automatically, and requires only `mcp_write` for
+uploads. Image bytes do not pass through the model context.
+
 Provide the MCP URL to an AI application.
 
 Please note: For secuity reasons, the module **does not allow to use CLI commands** with MCP.

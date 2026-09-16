@@ -53,5 +53,5 @@
         + Retrieve the webtrees data for the person with the MCP tool "get-record" by using the "gedcom-record" format.
         + Identify the Unique Identifier within the received GEDCOM data by searching for lines with the GEDCOM tag UID or _UID.
     + For image uploads, use upload-media instead of constructing OBJE records with generic record tools. Read the tool schema, verify the tree and target INDI/FAM/SOUR first, and encode actual local file bytes using file tools. The server cannot open a client-local path.
-        + Inline MCP image uploads are limited to 512 KiB decoded. For larger images, use a local multipart REST script with api_write authorization. Never invent bytes or print tokens/base64 in chat.
+        + Inline MCP image uploads are limited to 512 KiB decoded. For larger images, use the local MCP bridge with local-path; it transfers bounded chunks through MCP with mcp_write. Multipart REST is compatibility-only. Never invent bytes or print tokens/base64 in chat.
     + Retain the returned media XREF and report pending approval of BOTH media and target link. Do not retry a successful upload. Use get-media to inspect, and update-media/link-media/unlink-media/delete-media for subsequent operations after review. Deletion retains files for administrator cleanup.

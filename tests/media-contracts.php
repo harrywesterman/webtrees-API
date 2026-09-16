@@ -59,14 +59,14 @@ $mcpToolSource = file_get_contents(__DIR__ . '/../src/Http/RequestHandlers/McpTo
 check(str_contains($mcpToolSource, 'ReadAccess::TRANSPORT_MCP'), 'MCP transport marker');
 
 $settingsSource = file_get_contents(__DIR__ . '/../resources/views/settings.phtml');
-check(str_contains($settingsSource, "'token_scopes'         => $client_scopes,"), 'Token form passes client scope identifiers');
+check(str_contains($settingsSource, "'token_scopes'         => \$client_scopes,"), 'Token form passes client scope identifiers');
 $tokenModalSource = file_get_contents(__DIR__ . '/../src/Http/RequestHandlers/CreateTokenModal.php');
 check(str_contains($tokenModalSource, '$token_scope_identifiers'), 'Token modal reads scope identifiers');
 check(str_contains($tokenModalSource, 'getScopesForIdentifiers($token_scope_identifiers)'), 'Token modal resolves scope identifiers');
 $tokenActionSource = file_get_contents(__DIR__ . '/../src/Http/RequestHandlers/CreateTokenAction.php');
 check(str_contains($tokenActionSource, 'if (empty($token_scopes))'), 'Token creation rejects empty scopes');
 $seen = [];
-foreach (['UploadMedia', 'GetMedia', 'UpdateMedia', 'LinkMedia', 'UnlinkMedia', 'DeleteMedia'] as $short) {
+foreach (['UploadMedia', 'GetMedia', 'UpdateMedia', 'LinkMedia', 'UnlinkMedia', 'DeleteMedia', 'UploadMediaChunk'] as $short) {
     $class = 'Jefferson49\\Webtrees\\Module\\WebtreesApi\\Http\\RequestHandlers\\' . $short;
     $reflection = new ReflectionClass($class);
     check($reflection->implementsInterface(WebtreesMcpToolRequestHandlerInterface::class), 'Discoverable ' . $short);
@@ -74,7 +74,7 @@ foreach (['UploadMedia', 'GetMedia', 'UpdateMedia', 'LinkMedia', 'UnlinkMedia', 
     $seen[] = $tool['name'];
     check(in_array($tool['name'], $short === 'GetMedia' ? McpToolPermission::$mcp_read_tools : McpToolPermission::$mcp_write_tools, true), 'Tool scope ' . $short);
 }
-check($seen === MediaTools::ACTIONS, 'All six tools discovered once');
+check($seen === MediaTools::ACTIONS, 'All media tools discovered once');
 
 $protocolClass = new ReflectionClass(Jefferson49\Webtrees\Module\WebtreesApi\Http\Middleware\McpProtocol::class);
 $protocol = $protocolClass->newInstanceWithoutConstructor();
@@ -94,18 +94,44 @@ Registry::container()->set(Media::class, new class extends Media {
     public function execute(Psr\Http\Message\ServerRequestInterface $request, string $action): Psr\Http\Message\ResponseInterface {
         return new Response(202, ['Content-Type' => 'application/json'], json_encode([
             'action' => $action, 'mcp' => $request->getAttribute('media_mcp'), 'arguments' => $request->getQueryParams(),
+            'identity' => [$request->getAttribute('oauth_client_id'), $request->getAttribute('oauth_user_id'), $request->getAttribute('oauth_access_token_id')],
+            'internalFile' => $request->getAttribute('media_chunk_file') instanceof Psr\Http\Message\UploadedFileInterface,
         ]));
     }
 });
 $dispatcher = new Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\McpTool($factory, $factory,
     (new ReflectionClass(Fisharebest\Webtrees\Services\ModuleService::class))->newInstanceWithoutConstructor());
 foreach (MediaTools::ACTIONS as $action) {
+    if ($action === 'upload-media-chunk') { continue; } // Stateful dispatch exercised separately.
     $request = (new ServerRequest('GET', ''))->withAttribute('oauth_scopes', ['mcp_write'])
         ->withAttribute('mcp_tool_interface', WebtreesMcpToolRequestHandlerInterface::class)
         ->withParsedBody(['id' => 1, 'name' => $action, 'arguments' => ['tree' => 'test', 'xref' => 'M1']]);
     $result = json_decode((string) $dispatcher->handle($request)->getBody(), true);
     check(($result['result']['isError'] ?? true) === false, '202 is MCP success ' . $action);
     check(($result['result']['structuredContent']['action'] ?? '') === $action && $result['result']['structuredContent']['mcp'] === true, 'Dispatch ' . $action);
+}
+
+// Stateful tool through the actual dispatcher: identity survives reconstruction and arguments cannot override it.
+$spool = sys_get_temp_dir() . '/chunk-contract-' . bin2hex(random_bytes(8));
+Registry::container()->set(Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UploadMediaChunk::class,
+    new Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UploadMediaChunk(Registry::container()->get(Media::class),
+        new Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaChunkStore($spool)));
+$chunkArguments = ['upload-id' => sprintf('%08x', time()) . bin2hex(random_bytes(12)), 'offset' => 0, 'content-base64' => 'YQ==',
+    'total-bytes' => 1, 'sha256' => hash('sha256', 'a'), 'filename' => 'scan.png', 'tree' => 'test', 'target-xref' => 'I1', 'target-type' => 'INDI', 'final' => true];
+$chunkRequest = (new ServerRequest('GET', ''))->withAttribute('oauth_scopes', ['mcp_write'])
+    ->withAttribute('oauth_client_id', 'client')->withAttribute('oauth_user_id', 'user')->withAttribute('oauth_access_token_id', 'token')
+    ->withAttribute('mcp_tool_interface', WebtreesMcpToolRequestHandlerInterface::class)
+    ->withParsedBody(['id' => 7, 'name' => 'upload-media-chunk', 'arguments' => $chunkArguments]);
+try {
+    $result = json_decode((string) $dispatcher->handle($chunkRequest)->getBody(), true);
+    check(($result['result']['isError'] ?? true) === false, 'Chunk dispatcher success');
+    $content = $result['result']['structuredContent'];
+    check($content['identity'] === ['client', 'user', 'token'] && $content['mcp'] === true && $content['internalFile'] === true, 'Authenticated identity and internal file survive final dispatch');
+    $denied = $dispatcher->handle($chunkRequest->withParsedBody(['id' => 8, 'name' => 'upload-media-chunk', 'arguments' => $chunkArguments + ['oauth_access_token_id' => 'spoof']]));
+    check(json_decode((string) $denied->getBody(), true)['result']['isError'] === true, 'Caller cannot inject authentication attributes');
+} finally {
+    foreach (glob($spool . '/*') ?: [] as $file) { unlink($file); }
+    if (is_dir($spool)) { rmdir($spool); }
 }
 
 $next = new class implements Psr\Http\Server\RequestHandlerInterface {
@@ -177,7 +203,7 @@ check($processMcp->process(new ServerRequest('POST', '/mcp', ['Content-Type' => 
 check(str_contains(MediaTools::description('get-media')['description'], '/api/media/download'), 'Download tool path');
 check(str_contains(MediaTools::description('get-media')['description'], 'mcp_read_member'), 'Pending read scope documented');
 check(str_contains(MediaTools::description('upload-media')['description'], '512 KiB'), 'Inline upload limit documented');
-check(str_contains(MediaTools::description('upload-media')['description'], 'multipart REST POST /api/media'), 'Multipart upload documented');
+check(str_contains(MediaTools::description('upload-media')['description'], 'local MCP bridge'), 'Local MCP upload documented');
 $rpc413 = json_decode((string) Jefferson49\Webtrees\Module\WebtreesApi\Http\Middleware\McpProtocol::toolResult(
     1,
     new Response(413, ['Content-Type' => 'application/json'], json_encode([

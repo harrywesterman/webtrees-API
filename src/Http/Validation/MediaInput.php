@@ -9,7 +9,7 @@ use DomainException;
 /** Pure validation and GEDCOM helpers shared by the REST and MCP transports. */
 final class MediaInput
 {
-    /** Keep binary data out of the model context; use multipart REST above this size. */
+    /** Keep binary data out of the model context; use the local MCP bridge above this size. */
     public const int MCP_INLINE_LIMIT = 512 * 1024;
     /** Retained as a compatibility alias for clients that inspect the old constant. */
     public const int MCP_LIMIT = self::MCP_INLINE_LIMIT;
@@ -56,14 +56,14 @@ final class MediaInput
     public static function base64(string $encoded): string
     {
         if (strlen($encoded) > self::maxBase64Length()) {
-            throw new DomainException('Inline MCP images are limited to 512 KiB decoded. Use multipart REST POST /api/media for larger files.', 413);
+            throw new DomainException('Inline MCP images are limited to 512 KiB decoded. Use the local MCP bridge with local-path for larger files.', 413);
         }
         $bytes = base64_decode($encoded, true);
         if ($bytes === false || base64_encode($bytes) !== $encoded) {
             throw new DomainException('content-base64 must be canonical base64, without a data URL prefix or whitespace.', 400);
         }
         if (strlen($bytes) > self::MCP_INLINE_LIMIT) {
-            throw new DomainException('Inline MCP images are limited to 512 KiB decoded. Use multipart REST POST /api/media for larger files.', 413);
+            throw new DomainException('Inline MCP images are limited to 512 KiB decoded. Use the local MCP bridge with local-path for larger files.', 413);
         }
         return $bytes;
     }
