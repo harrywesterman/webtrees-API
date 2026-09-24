@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -45,6 +45,20 @@ test('discovery replaces base64 with local-path and hides internal chunk tool', 
   assert.ok(tools[0].inputSchema.properties['local-path']);
   assert.equal(tools[0].inputSchema.properties['content-base64'], undefined);
   assert.equal(tools[1].name, 'get-record');
+});
+
+test('download-media writes verified bytes to a private local temporary file', async () => {
+  const bytes = Buffer.from('real image bytes');
+  const bridge = new Bridge({ endpoint: 'https://example.test/mcp', token: 'test', fetchImpl: async (url, init) => {
+    const rpc = JSON.parse(init.body);
+    assert.equal(rpc.params.name, 'download-media');
+    const payload = { filename: 'scan.png', bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), 'content-base64': bytes.toString('base64') };
+    return { ok: true, json: async () => ({ jsonrpc: '2.0', id: rpc.id, result: { structuredContent: payload, content: [{ type: 'text', text: JSON.stringify(payload) }] } }) };
+  } });
+  const result = await bridge.handle({ method: 'tools/call', params: { name: 'download-media', arguments: { tree: 'test', xref: 'M1', filename: 'api-media/hash/scan.png' } } });
+  assert.equal(result.structuredContent['content-base64'], undefined);
+  assert.equal((await readFile(result.structuredContent['local-path'])).toString(), bytes.toString());
+  await rm(result.structuredContent['local-path'], { force: true });
 });
 
 test('refuses files outside upload roots, including symlink escape', async () => {

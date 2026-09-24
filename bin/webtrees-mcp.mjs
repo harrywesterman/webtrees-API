@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Node 22+. Local file transport; image bytes never enter the model's tool arguments.
-import { open, realpath, stat } from 'node:fs/promises';
+import { mkdtemp, open, realpath, stat, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { delimiter, resolve, relative, isAbsolute, basename } from 'node:path';
+import { delimiter, resolve, relative, isAbsolute, basename, join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
+import { tmpdir } from 'node:os';
 
 export const LIMIT = 20 * 1024 * 1024;
 export const CHUNK = 256 * 1024;
@@ -36,6 +37,10 @@ export class Bridge {
     const result = await this.rpc('tools/list');
     if (!result.tools.some(t => t.name === 'upload-media-chunk')) throw new Error('Server upgrade required: upload-media-chunk is missing.');
     return { tools: result.tools.filter(t => t.name !== 'upload-media-chunk').map(t => {
+      if (t.name === 'download-media') {
+        return { ...t, description: 'Download a visible media file and write it to a local temporary file. Supply the exact filename returned by get-media; the response contains local-path, bytes, and sha256, never base64.',
+          outputSchema: { type: 'object', properties: { 'local-path': { type: 'string' }, bytes: { type: 'integer' }, sha256: { type: 'string' } }, required: ['local-path', 'bytes', 'sha256'] } };
+      }
       if (t.name !== 'upload-media') return t;
       const properties = { ...t.inputSchema.properties };
       delete properties['content-base64']; delete properties.filename;
@@ -84,6 +89,29 @@ export class Bridge {
     }
     return result;
   }
+  async download(args) {
+    const result = await this.rpc('tools/call', { name: 'download-media', arguments: args });
+    if (result.isError) return result;
+    let payload = result.structuredContent;
+    if (!payload) {
+      try { payload = JSON.parse(result.content.find(c => c.type === 'text').text); }
+      catch { throw new Error('Invalid download response.'); }
+    }
+    if (typeof payload['content-base64'] !== 'string' || typeof payload.filename !== 'string' || typeof payload.sha256 !== 'string' || !Number.isInteger(payload.bytes)) {
+      throw new Error('Download response is missing file bytes or checksum.');
+    }
+    if (!/^[^/\\.][^/\\]*\.[A-Za-z0-9]+$/.test(payload.filename)) throw new Error('Download response contains an unsafe filename.');
+    const bytes = Buffer.from(payload['content-base64'], 'base64');
+    if (bytes.toString('base64') !== payload['content-base64'] || bytes.length !== payload.bytes || createHash('sha256').update(bytes).digest('hex') !== payload.sha256) {
+      throw new Error('Downloaded bytes failed checksum verification.');
+    }
+    const directory = await mkdtemp(join(tmpdir(), 'webtrees-download-'));
+    const path = join(directory, basename(payload.filename));
+    await writeFile(path, bytes, { mode: 0o600 });
+    delete payload['content-base64'];
+    const local = { ...payload, 'local-path': path };
+    return { ...result, structuredContent: local, content: [{ type: 'text', text: JSON.stringify(local) }] };
+  }
   async handle(request) {
     switch (request.method) {
       case 'initialize': return { protocolVersion: request.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'webtrees-local-file-bridge', version: '1.0.0' } };
@@ -91,7 +119,9 @@ export class Bridge {
       case 'tools/list': return this.list();
       case 'tools/call':
         if (request.params.name === 'upload-media-chunk') throw new Error('Use upload-media with local-path; chunk transport is internal.');
-        return request.params.name === 'upload-media' ? this.upload(request.params.arguments ?? {}) : this.rpc('tools/call', request.params);
+        if (request.params.name === 'upload-media') return this.upload(request.params.arguments ?? {});
+        if (request.params.name === 'download-media') return this.download(request.params.arguments ?? {});
+        return this.rpc('tools/call', request.params);
       default: throw new Error('Unsupported MCP method.');
     }
   }

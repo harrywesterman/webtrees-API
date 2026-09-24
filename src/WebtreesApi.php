@@ -196,6 +196,7 @@ class WebtreesApi extends AbstractModule implements
     public const string PATH_RENUMBER_XREFS       = 'renumber-xrefs';
     public const string PATH_MEDIA                 = 'media';
     public const string PATH_MEDIA_DOWNLOAD       = 'media/download';
+    public const string PATH_DOWNLOAD_MEDIA       = 'download-media';
 
     //Prefences, Settings
 	public const string PREF_WEBTREES_API_TOKEN        = "webtrees_api_token";

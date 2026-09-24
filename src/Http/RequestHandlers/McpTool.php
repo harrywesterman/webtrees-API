@@ -169,11 +169,13 @@ class McpTool implements RequestHandlerInterface
                 case 'upload-media':
                 case 'upload-media-chunk':
                 case 'get-media':
+                case WebtreesApi::PATH_DOWNLOAD_MEDIA:
                 case 'update-media':
                 case 'link-media':
                 case 'unlink-media':
                 case 'delete-media':
                     $media_handlers = ['upload-media' => UploadMedia::class, 'upload-media-chunk' => UploadMediaChunk::class, 'get-media' => GetMedia::class,
+                        WebtreesApi::PATH_DOWNLOAD_MEDIA => DownloadMedia::class,
                         'update-media' => UpdateMedia::class, 'link-media' => LinkMedia::class,
                         'unlink-media' => UnlinkMedia::class, 'delete-media' => DeleteMedia::class];
                     return $this->handleMcpTool($id, $request, Registry::container()->get($media_handlers[$tool_name]));

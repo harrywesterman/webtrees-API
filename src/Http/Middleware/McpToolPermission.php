@@ -58,6 +58,7 @@ class McpToolPermission implements MiddlewareInterface
     {
         self::$mcp_read_tools = [
             'get-media',
+            WebtreesApi::PATH_DOWNLOAD_MEDIA,
             WebtreesApi::PATH_GET_RECORD,
             WebtreesApi::PATH_SEARCH_GENERAL,
             WebtreesApi::PATH_GET_TREES,
