@@ -82,6 +82,7 @@ class McpToolPermission implements MiddlewareInterface
             WebtreesApi::PATH_UNLINK_CHILD,
             WebtreesApi::PATH_UNLINK_SPOUSE,
             WebtreesApi::PATH_CANCEL_PENDING,
+            WebtreesApi::PATH_UPLOAD_MEDIA_BATCH,
         ];
 
         self::$mcp_gedbas_tools = [

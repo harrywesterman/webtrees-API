@@ -259,6 +259,74 @@ class Media implements RequestHandlerInterface
             'message' => 'Upload stored; approve BOTH the media record and target link in webtrees. Do not repeat the upload.'], 201);
     }
 
+    /** Upload several media files and create one pending target-record change. */
+    public function executeBatch(ServerRequestInterface $request): ResponseInterface
+    {
+        $paths = [];
+        try {
+            $input = $request->getQueryParams();
+            $scopes = $request->getAttribute('oauth_scopes', []);
+            if (!array_intersect([Scopes::SCOPE_MCP_WRITE], $scopes)) {
+                throw new DomainException('Insufficient media permissions.', 403);
+            }
+            $tree = $this->trees->all()[MediaInput::text($input, 'tree')] ?? null;
+            if (!$tree instanceof Tree) throw new DomainException('Tree not found.', 404);
+            $this->check(CheckAccess::checkUserWriteAccess($tree));
+            $target = $this->target($tree, $input);
+            $this->editable($target);
+            $files = $input['files'] ?? null;
+            if (!is_array($files) || $files === [] || count($files) > 50) {
+                throw new DomainException('files must contain between 1 and 50 media files.', 400);
+            }
+
+            $total = 0;
+            $prepared = [];
+            foreach ($files as $file) {
+                if (!is_array($file)) throw new DomainException('Each files item must be an object.', 400);
+                $name = MediaInput::filename(is_string($file['filename'] ?? null) ? $file['filename'] : '');
+                $encoded = $file['content-base64'] ?? null;
+                if (!is_string($encoded) || $encoded === '') throw new DomainException('Each files item needs content-base64.', 400);
+                $bytes = base64_decode($encoded, true);
+                if ($bytes === false || base64_encode($bytes) !== $encoded) throw new DomainException('content-base64 must be canonical base64.', 400);
+                $total += strlen($bytes);
+                if ($total > MediaInput::REST_LIMIT) throw new DomainException('The batch exceeds the 20 MiB total limit.', 413);
+                $mime = MediaInput::image($bytes, $name, MediaInput::REST_LIMIT);
+                $path = 'api-media/' . bin2hex(random_bytes(16)) . '/' . $name;
+                $gedcom = "0 @@ OBJE\n1 FILE " . $path . "\n2 FORM " . strtoupper(pathinfo($name, PATHINFO_EXTENSION));
+                foreach (['title' => [2, 'TITL'], 'note' => [1, 'NOTE'], 'date' => [1, '_DATE']] as $key => [$level, $tag]) {
+                    if (array_key_exists($key, $file)) {
+                        $value = MediaInput::text($file, $key);
+                        if ($value !== '') $gedcom .= "\n" . MediaInput::field($level, $tag, $value);
+                    }
+                }
+                $tree->mediaFilesystem()->write($path, $bytes);
+                $paths[] = $path;
+                $prepared[] = compact('bytes', 'gedcom', 'mime', 'name', 'path');
+            }
+
+            $created = $this->mutate([$target], function () use ($tree, $target, $prepared): array {
+                $links = '';
+                $created = [];
+                foreach ($prepared as $item) {
+                    $record = $tree->createRecord($item['gedcom']);
+                    $links .= "\n1 OBJE @" . $record->xref() . '@';
+                    $created[] = ['xref' => $record->xref(), 'filename' => $item['path'], 'mime-type' => $item['mime']];
+                }
+                $target->updateRecord($target->gedcom() . $links, true);
+                return $created;
+            });
+
+            return api_response(['files' => $created, 'target-xref' => $target->xref(), 'pending' => true,
+                'message' => 'Batch upload stored; approve all media records and the target link. Do not repeat the batch.'], 201);
+        } catch (DomainException $e) {
+            foreach ($paths as $path) { try { ($tree ?? null)?->mediaFilesystem()->delete($path); } catch (Throwable) {} }
+            return api_response($e->getMessage(), $e->getCode() ?: 400);
+        } catch (Throwable) {
+            foreach ($paths as $path) { try { ($tree ?? null)?->mediaFilesystem()->delete($path); } catch (Throwable) {} }
+            return api_response('Media batch operation failed. Verify the record before retrying.', 500);
+        }
+    }
+
     private function target(Tree $tree, array $input): GedcomRecord
     {
         $record = $this->record($tree, MediaInput::text($input, 'target-xref'), true, false);

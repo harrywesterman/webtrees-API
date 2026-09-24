@@ -89,6 +89,7 @@ This README file contains the following main sections:
 |GET/get-pending-record|Read the pending GEDCOM changes for a record.|
 |DELETE/cancel-pending|Cancel pending changes for a record before moderator approval.|
 |MCP/download-media|Download a visible media file to a local temporary file through the local MCP bridge.|
+|MCP/upload-media-batch|Upload multiple local images and submit one combined pending change for one target.|
 |POST/merge-trees|Merge two trees. |
 |PUT/modify-record|Modify the GEDCOM data of a record. Existing FAMS/FAMC/OBJE/CHIL links are preserved by default; use `remove-protected-links=true` for an explicit removal or `dry-run=true` for a preview.|
 |POST/media|Upload an image, create an OBJE record, and submit its link to an individual, family, or source for approval.|

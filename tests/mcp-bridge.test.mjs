@@ -61,6 +61,25 @@ test('download-media writes verified bytes to a private local temporary file', a
   await rm(result.structuredContent['local-path'], { force: true });
 });
 
+test('upload-media-batch transfers multiple local images in one MCP call', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'webtrees-bridge-'));
+  try {
+    const first = join(dir, 'one.png'); const second = join(dir, 'two.jpg');
+    await writeFile(first, Buffer.from('first')); await writeFile(second, Buffer.from('second'));
+    let calls = 0;
+    const bridge = new Bridge({ endpoint: 'https://example.test/mcp', token: 'test', roots: [dir], fetchImpl: async (url, init) => {
+      calls++;
+      const rpc = JSON.parse(init.body); assert.equal(rpc.params.name, 'upload-media-batch');
+      const files = rpc.params.arguments.files; assert.equal(files.length, 2);
+      assert.equal(files[0]['local-path'], undefined); assert.equal(Buffer.from(files[0]['content-base64'], 'base64').toString(), 'first');
+      assert.equal(Buffer.from(files[1]['content-base64'], 'base64').toString(), 'second');
+      return { ok: true, json: async () => ({ jsonrpc: '2.0', id: rpc.id, result: { content: [{ type: 'text', text: '{"pending":true}' }] } }) };
+    } });
+    const result = await bridge.handle({ method: 'tools/call', params: { name: 'upload-media-batch', arguments: { tree: 'test', 'target-xref': 'I1', 'target-type': 'INDI', files: [{ 'local-path': first }, { 'local-path': second, title: 'Two' }] } } });
+    assert.equal(calls, 1); assert.equal(result.content[0].text, '{"pending":true}');
+  } finally { await rm(dir, { recursive: true }); }
+});
+
 test('refuses files outside upload roots, including symlink escape', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'webtrees-bridge-'));
   const outside = await mkdtemp(join(tmpdir(), 'webtrees-outside-'));

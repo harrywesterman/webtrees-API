@@ -41,6 +41,12 @@ export class Bridge {
         return { ...t, description: 'Download a visible media file and write it to a local temporary file. Supply the exact filename returned by get-media; the response contains local-path, bytes, and sha256, never base64.',
           outputSchema: { type: 'object', properties: { 'local-path': { type: 'string' }, bytes: { type: 'integer' }, sha256: { type: 'string' } }, required: ['local-path', 'bytes', 'sha256'] } };
       }
+      if (t.name === 'upload-media-batch') {
+        const properties = { ...t.inputSchema.properties };
+        properties.files = { type: 'array', minItems: 1, maxItems: 50, description: 'Local image files. Each item must contain local-path and may contain title, note, or date.' };
+        return { ...t, description: 'Upload multiple local images through MCP and link them to one verified target in one pending change. Supply local-path for each file; never base64.',
+          inputSchema: { type: 'object', properties, required: ['tree', 'target-xref', 'target-type', 'files'], additionalProperties: false } };
+      }
       if (t.name !== 'upload-media') return t;
       const properties = { ...t.inputSchema.properties };
       delete properties['content-base64']; delete properties.filename;
@@ -89,6 +95,28 @@ export class Bridge {
     }
     return result;
   }
+  async readLocal(inputPath) {
+    if (typeof inputPath !== 'string' || !isAbsolute(inputPath)) throw new Error('local-path must be an absolute file path.');
+    const path = await realpath(inputPath);
+    const roots = await Promise.all(this.roots.map(r => realpath(resolve(r))));
+    if (!roots.some(root => { const rel = relative(root, path); return rel && !rel.startsWith('..') && !isAbsolute(rel) && !rel.split(/[\\/]/).some(p => p.startsWith('.')); })) {
+      throw new Error('File is outside permitted upload roots, or in a hidden directory. Configure WEBTREES_UPLOAD_ROOTS.');
+    }
+    if (!/\.(jpe?g|png|gif|webp)$/i.test(path)) throw new Error('Only JPEG, PNG, GIF and WebP files can be uploaded.');
+    const expected = await stat(path);
+    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const current = await handle.stat();
+      if (current.dev !== expected.dev || current.ino !== expected.ino || await realpath(path) !== path) throw new Error('File path changed while opening.');
+      if (!current.isFile() || current.size <= 0 || current.size > LIMIT) throw new Error('Image must be a regular file between 1 byte and 20 MiB.');
+      const bytes = Buffer.alloc(current.size);
+      let read = 0;
+      while (read < bytes.length) { const part = await handle.read(bytes, read, bytes.length - read, read); if (!part.bytesRead) throw new Error('Image changed while reading.'); read += part.bytesRead; }
+      const after = await handle.stat();
+      if (after.size !== current.size || after.mtimeMs !== current.mtimeMs) throw new Error('Image changed while reading.');
+      return bytes;
+    } finally { await handle.close(); }
+  }
   async download(args) {
     const result = await this.rpc('tools/call', { name: 'download-media', arguments: args });
     if (result.isError) return result;
@@ -112,6 +140,19 @@ export class Bridge {
     const local = { ...payload, 'local-path': path };
     return { ...result, structuredContent: local, content: [{ type: 'text', text: JSON.stringify(local) }] };
   }
+  async uploadBatch(args) {
+    if (!Array.isArray(args.files) || args.files.length < 1 || args.files.length > 50) throw new Error('files must contain between 1 and 50 local image files.');
+    const files = [];
+    let total = 0;
+    for (const item of args.files) {
+      if (!item || typeof item['local-path'] !== 'string') throw new Error('Each batch file needs an absolute local-path.');
+      const bytes = await this.readLocal(item['local-path']);
+      total += bytes.length;
+      if (total > LIMIT) throw new Error('The batch exceeds the 20 MiB total limit.');
+      files.push({ filename: basename(await realpath(item['local-path'])), 'content-base64': bytes.toString('base64'), ...Object.fromEntries(['title', 'note', 'date'].filter(k => item[k] !== undefined).map(k => [k, item[k]])) });
+    }
+    return this.rpc('tools/call', { name: 'upload-media-batch', arguments: { ...args, files } });
+  }
   async handle(request) {
     switch (request.method) {
       case 'initialize': return { protocolVersion: request.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'webtrees-local-file-bridge', version: '1.0.0' } };
@@ -121,6 +162,7 @@ export class Bridge {
         if (request.params.name === 'upload-media-chunk') throw new Error('Use upload-media with local-path; chunk transport is internal.');
         if (request.params.name === 'upload-media') return this.upload(request.params.arguments ?? {});
         if (request.params.name === 'download-media') return this.download(request.params.arguments ?? {});
+        if (request.params.name === 'upload-media-batch') return this.uploadBatch(request.params.arguments ?? {});
         return this.rpc('tools/call', request.params);
       default: throw new Error('Unsupported MCP method.');
     }

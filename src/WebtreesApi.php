@@ -197,6 +197,7 @@ class WebtreesApi extends AbstractModule implements
     public const string PATH_MEDIA                 = 'media';
     public const string PATH_MEDIA_DOWNLOAD       = 'media/download';
     public const string PATH_DOWNLOAD_MEDIA       = 'download-media';
+    public const string PATH_UPLOAD_MEDIA_BATCH   = 'upload-media-batch';
 
     //Prefences, Settings
 	public const string PREF_WEBTREES_API_TOKEN        = "webtrees_api_token";
