@@ -81,9 +81,12 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ExportTree;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Gedbas\PersonData;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Gedbas\SearchSimple;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\GetRecord;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\GetPendingRecord;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ImportTree;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkChildToFamily;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkSpouseToIndividual;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ListPendingChanges;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\CancelPending;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UnlinkChild;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UnlinkSpouse;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\McpTool;
@@ -175,6 +178,9 @@ class WebtreesApi extends AbstractModule implements
     public const string PATH_GET_VERSION          = 'get-version';
     public const string PATH_SEARCH_GENERAL       = 'search-general';
     public const string PATH_GET_RECORD           = 'get-record';
+    public const string PATH_LIST_PENDING_CHANGES = 'list-pending-changes';
+    public const string PATH_GET_PENDING_RECORD   = 'get-pending-record';
+    public const string PATH_CANCEL_PENDING       = 'cancel-pending';
     public const string PATH_MODIFY_RECORD        = 'modify-record';
     public const string PATH_ADD_UNLINKED_RECORD  = 'add-unlinked-record';
     public const string PATH_DELETE_RECORD        = 'delete-record';
@@ -277,6 +283,15 @@ class WebtreesApi extends AbstractModule implements
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_SPOUSE_TO_INDI, AddSpouseToIndividual::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_LINK_CHILD_TO_FAMILY, LinkChildToFamily::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_LINK_SPOUSE_TO_INDI, LinkSpouseToIndividual::class, null, $api_middleware);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_LIST_PENDING_CHANGES, ListPendingChanges::class, null, $api_middleware);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_GET_PENDING_RECORD, GetPendingRecord::class, null, $api_middleware);
+        if (version_compare(Webtrees::VERSION, '2.3.0', '>=')) {
+            Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_CANCEL_PENDING, CancelPending::class, null, $api_middleware);
+        }
+        else {
+            $router = Registry::routeFactory()->routeMap();
+            $router->delete(CancelPending::class, self::ROUTE_API . '/' . self::PATH_CANCEL_PENDING)->extras(['middleware' => $api_middleware]);
+        }
         if (version_compare(Webtrees::VERSION, '2.3.0', '>=')) {
             Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_UNLINK_CHILD, UnlinkChild::class, null, $api_middleware);
             Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_UNLINK_SPOUSE, UnlinkSpouse::class, null, $api_middleware);

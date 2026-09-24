@@ -53,8 +53,11 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\AddUnlinkedReco
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Gedbas\PersonData;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Gedbas\SearchSimple;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\GetRecord;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\GetPendingRecord;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkChildToFamily;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkSpouseToIndividual;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ListPendingChanges;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\CancelPending;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UnlinkChild;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UnlinkSpouse;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ModifyRecord;
@@ -150,6 +153,15 @@ class McpTool implements RequestHandlerInterface
             switch ($tool_name) {
                 case WebtreesApi::PATH_GET_RECORD:
                     $handler = Registry::container()->get(GetRecord::class);
+                    return $this->handleMcpTool($id, $request, $handler);
+                case WebtreesApi::PATH_LIST_PENDING_CHANGES:
+                    $handler = Registry::container()->get(ListPendingChanges::class);
+                    return $this->handleMcpTool($id, $request, $handler);
+                case WebtreesApi::PATH_GET_PENDING_RECORD:
+                    $handler = Registry::container()->get(GetPendingRecord::class);
+                    return $this->handleMcpTool($id, $request, $handler);
+                case WebtreesApi::PATH_CANCEL_PENDING:
+                    $handler = Registry::container()->get(CancelPending::class);
                     return $this->handleMcpTool($id, $request, $handler);
                 case WebtreesApi::PATH_MODIFY_RECORD:
                     $handler = Registry::container()->get(ModifyRecord::class);

@@ -48,6 +48,9 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ExportTree;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Gedbas\PersonData;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Gedbas\SearchSimple;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\GetRecord;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\GetPendingRecord;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ListPendingChanges;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\CancelPending;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ImportTree;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkChildToFamily;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkSpouseToIndividual;
@@ -74,6 +77,8 @@ class ApiPermission implements MiddlewareInterface
 {
     public const array API_READ_HANDLERS = [
         GetRecord::class,
+        ListPendingChanges::class,
+        GetPendingRecord::class,
         SearchGeneral::class,
         Trees::class,
         WebtreesVersion::class
@@ -90,6 +95,7 @@ class ApiPermission implements MiddlewareInterface
         LinkChildToFamily::class,
         LinkSpouseToIndividual::class,
         ModifyRecord::class,
+        CancelPending::class,
     ];
 
     public const array API_IMPORT_HANDLERS = [

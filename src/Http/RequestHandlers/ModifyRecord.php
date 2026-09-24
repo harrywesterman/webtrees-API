@@ -43,6 +43,7 @@ use Jefferson49\Webtrees\Authorization\Auth;
 use Jefferson49\Webtrees\Helpers\Authorization;
 use Jefferson49\Webtrees\Helpers\Functions;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\GedcomRecordMutation;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\PendingChangeDetails;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Parameter\Gedcom as GedcomParameter;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Parameter\Note as NoteParameter;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Parameter\Tree as TreeParameter;
@@ -308,6 +309,19 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
                 'preserved-links' => $preserved_links,
                 'removed-links' => $removed_links,
             ], StatusCodeInterface::STATUS_OK);
+        }
+
+        $pending_changes = array_map(
+            static fn (object $row): array => PendingChangeDetails::serialize($row),
+            PendingChangeDetails::rows($tree, $record->xref()),
+        );
+        if ($pending_changes !== []) {
+            return api_response([
+                'error' => 'pending_conflict',
+                'xref' => $record->xref(),
+                'pending-changes' => $pending_changes,
+                'message' => 'The record has pending changes. Review or cancel the listed change before submitting another write.',
+            ], StatusCodeInterface::STATUS_CONFLICT);
         }
 
         $record->updateRecord($modified_gedcom, false);

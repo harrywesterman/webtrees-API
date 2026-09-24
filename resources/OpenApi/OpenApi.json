@@ -2120,6 +2120,63 @@
                 }
             }
         },
+        "/list-pending-changes": {
+            "get": {
+                "tags": ["webtrees"],
+                "description": "List pending approval-queue changes for a tree, optionally limited to one record.",
+                "operationId": "list-pending-changes",
+                "parameters": [
+                    {"$ref": "#/components/parameters/tree"},
+                    {"name": "xref", "in": "query", "description": "Optional record XREF filter.", "required": false, "schema": {"$ref": "#/components/schemas/Xref"}}
+                ],
+                "responses": {
+                    "200": {"description": "Pending changes for the tree."},
+                    "400": {"$ref": "#/components/responses/400"},
+                    "401": {"$ref": "#/components/responses/401"},
+                    "403": {"$ref": "#/components/responses/403"},
+                    "500": {"$ref": "#/components/responses/500"}
+                }
+            }
+        },
+        "/get-pending-record": {
+            "get": {
+                "tags": ["webtrees"],
+                "description": "Get the pending GEDCOM changes for one record.",
+                "operationId": "get-pending-record",
+                "parameters": [
+                    {"$ref": "#/components/parameters/tree"},
+                    {"name": "xref", "in": "query", "description": "The record XREF.", "required": true, "schema": {"$ref": "#/components/schemas/Xref"}}
+                ],
+                "responses": {
+                    "200": {"description": "Pending record changes."},
+                    "400": {"$ref": "#/components/responses/400"},
+                    "401": {"$ref": "#/components/responses/401"},
+                    "403": {"$ref": "#/components/responses/403"},
+                    "404": {"$ref": "#/components/responses/404"},
+                    "500": {"$ref": "#/components/responses/500"}
+                }
+            }
+        },
+        "/cancel-pending": {
+            "delete": {
+                "tags": ["webtrees"],
+                "description": "Cancel pending changes for a record before moderator approval.",
+                "operationId": "cancel-pending",
+                "parameters": [
+                    {"$ref": "#/components/parameters/tree"},
+                    {"name": "xref", "in": "query", "description": "The record XREF.", "required": true, "schema": {"$ref": "#/components/schemas/Xref"}},
+                    {"name": "change-id", "in": "query", "description": "Optional change ID; cancels this and later pending changes for the record.", "required": false, "schema": {"type": "string"}}
+                ],
+                "responses": {
+                    "200": {"description": "Pending changes cancelled."},
+                    "400": {"$ref": "#/components/responses/400"},
+                    "401": {"$ref": "#/components/responses/401"},
+                    "403": {"$ref": "#/components/responses/403"},
+                    "404": {"$ref": "#/components/responses/404"},
+                    "500": {"$ref": "#/components/responses/500"}
+                }
+            }
+        },
         "/merge-trees": {
             "post": {
                 "tags": [
