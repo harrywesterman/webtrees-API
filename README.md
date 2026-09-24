@@ -86,7 +86,7 @@ This README file contains the following main sections:
 |DELETE/unlink-child|Remove an existing child-to-family relationship while preserving both records.|
 |DELETE/unlink-spouse|Remove an existing spouse-to-family relationship while preserving both records.|
 |POST/merge-trees|Merge two trees. |
-|PUT/modify-record|Modify the GEDCOM data of a record.|
+|PUT/modify-record|Modify the GEDCOM data of a record. Existing FAMS/FAMC/OBJE/CHIL links are preserved by default; use `remove-protected-links=true` for an explicit removal or `dry-run=true` for a preview.|
 |POST/media|Upload an image, create an OBJE record, and submit its link to an individual, family, or source for approval.|
 |GET/media|Retrieve media metadata and its webtrees URL.|
 |PUT/media|Update media title, date, or note.|

@@ -2,9 +2,10 @@
 
 declare(strict_types=1);
 
-namespace Jefferson49\Webtrees\Helpers;
+namespace Jefferson49\Webtrees\Module\WebtreesApi\Helpers;
 
 use Fisharebest\Webtrees\GedcomRecord;
+use Jefferson49\Webtrees\Helpers\Functions;
 
 final class RelationshipLinks
 {

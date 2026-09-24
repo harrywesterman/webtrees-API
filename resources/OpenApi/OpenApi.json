@@ -934,6 +934,26 @@
                     },
                     {
                         "$ref": "#/components/parameters/note"
+                    },
+                    {
+                        "name": "remove-protected-links",
+                        "in": "query",
+                        "description": "Explicitly allow removal of existing FAMS, FAMC, OBJE or CHIL links. Defaults to false.",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": false
+                        }
+                    },
+                    {
+                        "name": "dry-run",
+                        "in": "query",
+                        "description": "Preview the resulting GEDCOM without creating a pending change.",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": false
+                        }
                     }
                 ],
                 "responses": {

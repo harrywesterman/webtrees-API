@@ -42,6 +42,7 @@ use Fisharebest\Webtrees\Validator;
 use Jefferson49\Webtrees\Authorization\Auth;
 use Jefferson49\Webtrees\Helpers\Authorization;
 use Jefferson49\Webtrees\Helpers\Functions;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\GedcomRecordMutation;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Parameter\Gedcom as GedcomParameter;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Parameter\Note as NoteParameter;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Parameter\Tree as TreeParameter;
@@ -110,6 +111,20 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
             new OA\Parameter(
                 ref: NoteParameter::class,
                 required: false,
+            ),
+            new OA\Parameter(
+                name: 'remove-protected-links',
+                in: 'query',
+                description: 'Explicitly allow removal of existing FAMS, FAMC, OBJE or CHIL links. Defaults to false.',
+                required: false,
+                schema: new OA\Schema(type: 'boolean', default: false),
+            ),
+            new OA\Parameter(
+                name: 'dry-run',
+                in: 'query',
+                description: 'Preview the resulting GEDCOM without creating a pending change.',
+                required: false,
+                schema: new OA\Schema(type: 'boolean', default: false),
             ),
         ],
         responses: [
@@ -183,6 +198,8 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
         $xref      = Validator::queryParams($request)->string('xref', '');
         $gedcom    = Validator::queryParams($request)->string('gedcom', '');
         $note      = Validator::queryParams($request)->string('note', '');
+        $remove_protected_links = Validator::queryParams($request)->boolean('remove-protected-links', false);
+        $dry_run = Validator::queryParams($request)->boolean('dry-run', false);
 
         // Adopt line breaks for GEDCOM text
         $gedcom    = str_replace(["\r\n", '\n', "%OA"], ["\n", "\n", "\n"], $gedcom);
@@ -272,18 +289,25 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
         $modified_gedcom = preg_replace('/[\r\n]+/', "\n", $modified_gedcom);
         $modified_gedcom = trim($modified_gedcom);
 
-        // MCP clients commonly send back a previously read record. Refuse to
-        // turn an incomplete read into an implicit relationship/media unlink.
-        if ($request->getAttribute('webtrees_api_transport') === 'mcp') {
+        $removed_links = self::removedProtectedLinks($record->gedcom(), $modified_gedcom);
+        $preserved_links = [];
+
+        if (!$remove_protected_links) {
+            $preserved = GedcomRecordMutation::preserveProtectedLinks($record->gedcom(), $modified_gedcom);
+            $modified_gedcom = $preserved['gedcom'];
+            $preserved_links = $preserved['preserved'];
             $removed_links = self::removedProtectedLinks($record->gedcom(), $modified_gedcom);
-            if ($removed_links !== []) {
-                return api_response([
-                    'error' => 'protected_links_would_be_removed',
-                    'xref' => $record->xref(),
-                    'removed-links' => $removed_links,
-                    'message' => 'The submitted GEDCOM would remove existing FAMS, FAMC or OBJE links. Use the dedicated relationship or media-link tool for an intentional unlink.',
-                ], StatusCodeInterface::STATUS_CONFLICT);
-            }
+        }
+
+        if ($dry_run) {
+            return api_response([
+                'dry-run' => true,
+                'xref' => $record->xref(),
+                'old-gedcom' => trim($record->gedcom()),
+                'new-gedcom' => $modified_gedcom,
+                'preserved-links' => $preserved_links,
+                'removed-links' => $removed_links,
+            ], StatusCodeInterface::STATUS_OK);
         }
 
         $record->updateRecord($modified_gedcom, false);
@@ -299,16 +323,7 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
      */
     private static function removedProtectedLinks(string $before, string $after): array
     {
-        $links = static function (string $gedcom): array {
-            preg_match_all('/^1 (FAMS|FAMC|OBJE) ([^\n]+)$/m', $gedcom, $matches, PREG_SET_ORDER);
-
-            return array_values(array_unique(array_map(
-                static fn (array $match): string => $match[1] . ' ' . $match[2],
-                $matches,
-            )));
-        };
-
-        return array_values(array_diff($links($before), $links($after)));
+        return GedcomRecordMutation::removedProtectedLinks($before, $after);
     }
 
 	/**
@@ -334,6 +349,16 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
                         McpSchema::PREPEND
                     ),
                     'note' => McpSchema::NOTE,
+                    'remove-protected-links' => [
+                        'type' => 'boolean',
+                        'description' => 'Explicitly allow removal of existing FAMS, FAMC, OBJE or CHIL links. Defaults to false.',
+                        'default' => false,
+                    ],
+                    'dry-run' => [
+                        'type' => 'boolean',
+                        'description' => 'Preview the resulting GEDCOM without creating a pending change.',
+                        'default' => false,
+                    ],
                 ],
                 'required' => ['tree', 'xref', 'gedcom']
             ],
