@@ -65,6 +65,8 @@ class McpToolPermission implements MiddlewareInterface
             WebtreesApi::PATH_GET_VERSION,
             WebtreesApi::PATH_LIST_PENDING_CHANGES,
             WebtreesApi::PATH_GET_PENDING_RECORD,
+            WebtreesApi::PATH_GET_SOURCES,
+            WebtreesApi::PATH_GET_CITATIONS,
         ];
 
         self::$mcp_write_tools = [
@@ -83,6 +85,9 @@ class McpToolPermission implements MiddlewareInterface
             WebtreesApi::PATH_UNLINK_SPOUSE,
             WebtreesApi::PATH_CANCEL_PENDING,
             WebtreesApi::PATH_UPLOAD_MEDIA_BATCH,
+            WebtreesApi::PATH_CREATE_SOURCE,
+            WebtreesApi::PATH_MODIFY_SOURCE,
+            WebtreesApi::PATH_ADD_SOURCE_CITATION,
         ];
 
         self::$mcp_gedbas_tools = [

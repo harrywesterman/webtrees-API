@@ -73,6 +73,11 @@ This README file contains the following main sections:
 |POST/add-spouse-to-family|Add a new INDI record for a spouse to a family.|
 |POST/add-spouse-to-individual|Add a new INDI record for a spouse to an indivudal.|
 |POST/add-unlinked-record|Add a GEDCOM record, which is not linked to any other record. |
+|MCP/create-source|Create a first-class `SOUR` record with title, author, publication and note fields.|
+|MCP/modify-source|Update source fields without replacing unrelated source GEDCOM data.|
+|MCP/get-sources|List first-class source records in a tree.|
+|MCP/add-source-citation|Link a source to an INDI/FAM record or a specific event; duplicate links are no-ops.|
+|MCP/get-citations|Read source citations, including event, page and note details.|
 |GET/convert-gedcom|Convert a GEDCOM file. |
 |POST/create-tree|Create a new tree on the webtrees server. |
 |DELETE/delete-record|Delete a GEDCOM record. |

@@ -87,6 +87,11 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkChildToFami
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkSpouseToIndividual;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ListPendingChanges;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\CancelPending;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\CreateSource;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ModifySource;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\GetSources;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\AddSourceCitation;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\GetCitations;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UnlinkChild;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UnlinkSpouse;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\McpTool;
@@ -198,6 +203,11 @@ class WebtreesApi extends AbstractModule implements
     public const string PATH_MEDIA_DOWNLOAD       = 'media/download';
     public const string PATH_DOWNLOAD_MEDIA       = 'download-media';
     public const string PATH_UPLOAD_MEDIA_BATCH   = 'upload-media-batch';
+    public const string PATH_CREATE_SOURCE        = 'create-source';
+    public const string PATH_MODIFY_SOURCE        = 'modify-source';
+    public const string PATH_GET_SOURCES          = 'get-sources';
+    public const string PATH_ADD_SOURCE_CITATION   = 'add-source-citation';
+    public const string PATH_GET_CITATIONS         = 'get-citations';
 
     //Prefences, Settings
 	public const string PREF_WEBTREES_API_TOKEN        = "webtrees_api_token";
@@ -278,6 +288,11 @@ class WebtreesApi extends AbstractModule implements
         }
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_CONVERT_GEDCOM, ConvertGedcom::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_UNLINKED_RECORD, AddUnlinkedRecord::class, null, $api_middleware);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_CREATE_SOURCE, CreateSource::class, null, $api_middleware);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_MODIFY_SOURCE, ModifySource::class, null, $api_middleware);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_GET_SOURCES, GetSources::class, null, $api_middleware);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_SOURCE_CITATION, AddSourceCitation::class, null, $api_middleware);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_GET_CITATIONS, GetCitations::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_CHILD_TO_FAMILY, AddChildToFamily::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_CHILD_TO_INDI, AddChildToIndividual::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_PARENT_TO_INDI, AddParentToIndividual::class, null, $api_middleware);

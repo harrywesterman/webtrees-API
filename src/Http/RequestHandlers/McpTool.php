@@ -166,6 +166,21 @@ class McpTool implements RequestHandlerInterface
                 case WebtreesApi::PATH_MODIFY_RECORD:
                     $handler = Registry::container()->get(ModifyRecord::class);
                     return $this->handleMcpTool($id, $request, $handler);
+                case WebtreesApi::PATH_CREATE_SOURCE:
+                    $handler = Registry::container()->get(CreateSource::class);
+                    return $this->handleMcpTool($id, $request, $handler);
+                case WebtreesApi::PATH_MODIFY_SOURCE:
+                    $handler = Registry::container()->get(ModifySource::class);
+                    return $this->handleMcpTool($id, $request, $handler);
+                case WebtreesApi::PATH_GET_SOURCES:
+                    $handler = Registry::container()->get(GetSources::class);
+                    return $this->handleMcpTool($id, $request, $handler);
+                case WebtreesApi::PATH_ADD_SOURCE_CITATION:
+                    $handler = Registry::container()->get(AddSourceCitation::class);
+                    return $this->handleMcpTool($id, $request, $handler);
+                case WebtreesApi::PATH_GET_CITATIONS:
+                    $handler = Registry::container()->get(GetCitations::class);
+                    return $this->handleMcpTool($id, $request, $handler);
                 case 'upload-media':
                 case 'upload-media-chunk':
                 case 'get-media':
