@@ -81,6 +81,7 @@ This README file contains the following main sections:
 |Errors|Error responses use `error.code` values such as `token_invalid`, `scope_missing`, `pending_conflict`, `protected_links_would_be_removed`, and `inline_upload_too_large`; the local MCP bridge preserves these codes.|
 |MCP/verify-write|Verify a write as `pending`, `applied`, `pending_delete`, or `deleted` using the returned SHA-256 record hash.|
 |MCP/search-structured|Search by name, place, year range, occupation, or full text in NOTE/source fields with stable offset/limit pagination and tree/XREF sorting.|
+|MCP/add-family|Create spouses, children, FAMS/FAMC/CHIL links and family notes in one transactional pending operation; repeat the idempotency key safely.|
 |GET/convert-gedcom|Convert a GEDCOM file. |
 |POST/create-tree|Create a new tree on the webtrees server. |
 |DELETE/delete-record|Delete a GEDCOM record. |
