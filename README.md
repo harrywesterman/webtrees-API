@@ -83,6 +83,8 @@ This README file contains the following main sections:
 |POST/import-tree|Import a tree from a GEDCOM file in the data folder on the webtrees server. |
 |POST/link-child-to-family|Link an existing INDI record as a child to a family.|
 |POST/link-spouse-to-individual|Link an existing INDI record as a spouse to an individual.|
+|DELETE/unlink-child|Remove an existing child-to-family relationship while preserving both records.|
+|DELETE/unlink-spouse|Remove an existing spouse-to-family relationship while preserving both records.|
 |POST/merge-trees|Merge two trees. |
 |PUT/modify-record|Modify the GEDCOM data of a record.|
 |POST/media|Upload an image, create an OBJE record, and submit its link to an individual, family, or source for approval.|

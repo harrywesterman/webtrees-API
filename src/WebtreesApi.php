@@ -84,6 +84,8 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\GetRecord;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ImportTree;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkChildToFamily;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkSpouseToIndividual;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UnlinkChild;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UnlinkSpouse;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\McpTool;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MergeTrees;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Media;
@@ -168,6 +170,8 @@ class WebtreesApi extends AbstractModule implements
     public const string PATH_ADD_SPOUSE_TO_FAMILY = 'add-spouse-to-family';
     public const string PATH_LINK_CHILD_TO_FAMILY = 'link-child-to-family';
     public const string PATH_LINK_SPOUSE_TO_INDI  = 'link-spouse-to-individual';
+    public const string PATH_UNLINK_CHILD         = 'unlink-child';
+    public const string PATH_UNLINK_SPOUSE       = 'unlink-spouse';
     public const string PATH_GET_VERSION          = 'get-version';
     public const string PATH_SEARCH_GENERAL       = 'search-general';
     public const string PATH_GET_RECORD           = 'get-record';
@@ -273,6 +277,15 @@ class WebtreesApi extends AbstractModule implements
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_SPOUSE_TO_INDI, AddSpouseToIndividual::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_LINK_CHILD_TO_FAMILY, LinkChildToFamily::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_LINK_SPOUSE_TO_INDI, LinkSpouseToIndividual::class, null, $api_middleware);
+        if (version_compare(Webtrees::VERSION, '2.3.0', '>=')) {
+            Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_UNLINK_CHILD, UnlinkChild::class, null, $api_middleware);
+            Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_UNLINK_SPOUSE, UnlinkSpouse::class, null, $api_middleware);
+        }
+        else {
+            $router = Registry::routeFactory()->routeMap();
+            $router->delete(UnlinkChild::class, self::ROUTE_API . '/' . self::PATH_UNLINK_CHILD)->extras(['middleware' => $api_middleware]);
+            $router->delete(UnlinkSpouse::class, self::ROUTE_API . '/' . self::PATH_UNLINK_SPOUSE)->extras(['middleware' => $api_middleware]);
+        }
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_GEDBAS_PERSON_DATA, PersonData::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_GEDBAS_SEARCH_SIMPLE, SearchSimple::class, null, $api_middleware);
 

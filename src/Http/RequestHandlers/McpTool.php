@@ -55,6 +55,8 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Gedbas\SearchSi
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\GetRecord;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkChildToFamily;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\LinkSpouseToIndividual;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UnlinkChild;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UnlinkSpouse;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ModifyRecord;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\SearchGeneral;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Trees;
@@ -198,6 +200,12 @@ class McpTool implements RequestHandlerInterface
                     return $this->handleMcpTool($id, $request, $handler);
                 case WebtreesApi::PATH_LINK_SPOUSE_TO_INDI:
                     $handler = Registry::container()->get(LinkSpouseToIndividual::class);
+                    return $this->handleMcpTool($id, $request, $handler);
+                case WebtreesApi::PATH_UNLINK_CHILD:
+                    $handler = Registry::container()->get(UnlinkChild::class);
+                    return $this->handleMcpTool($id, $request, $handler);
+                case WebtreesApi::PATH_UNLINK_SPOUSE:
+                    $handler = Registry::container()->get(UnlinkSpouse::class);
                     return $this->handleMcpTool($id, $request, $handler);
                 default:
                     return api_response(McpProtocol::payloadMethodUnknown($id), StatusCodeInterface::STATUS_OK);

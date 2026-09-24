@@ -2056,6 +2056,50 @@
                 }
             }
         },
+        "/unlink-child": {
+            "delete": {
+                "tags": ["webtrees"],
+                "description": "Remove an individual from a family as a child, preserving both records.",
+                "operationId": "unlink-child",
+                "parameters": [
+                    {"$ref": "#/components/parameters/tree"},
+                    {"name": "individual-xref", "in": "query", "description": "The XREF of the child individual to unlink.", "required": true, "schema": {"$ref": "#/components/schemas/Xref"}},
+                    {"name": "family-xref", "in": "query", "description": "The XREF of the family from which the child shall be unlinked.", "required": true, "schema": {"$ref": "#/components/schemas/Xref"}}
+                ],
+                "responses": {
+                    "200": {"description": "Successfully unlinked child.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/XrefItem"}}}},
+                    "400": {"$ref": "#/components/responses/400"},
+                    "401": {"$ref": "#/components/responses/401"},
+                    "403": {"$ref": "#/components/responses/403"},
+                    "404": {"$ref": "#/components/responses/404"},
+                    "406": {"$ref": "#/components/responses/406"},
+                    "429": {"$ref": "#/components/responses/429"},
+                    "500": {"$ref": "#/components/responses/500"}
+                }
+            }
+        },
+        "/unlink-spouse": {
+            "delete": {
+                "tags": ["webtrees"],
+                "description": "Remove an individual from a family as a spouse, preserving both records.",
+                "operationId": "unlink-spouse",
+                "parameters": [
+                    {"$ref": "#/components/parameters/tree"},
+                    {"name": "individual-xref", "in": "query", "description": "The XREF of the spouse individual to unlink.", "required": true, "schema": {"$ref": "#/components/schemas/Xref"}},
+                    {"name": "family-xref", "in": "query", "description": "The XREF of the family from which the spouse shall be unlinked.", "required": true, "schema": {"$ref": "#/components/schemas/Xref"}}
+                ],
+                "responses": {
+                    "200": {"description": "Successfully unlinked spouse.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/XrefItem"}}}},
+                    "400": {"$ref": "#/components/responses/400"},
+                    "401": {"$ref": "#/components/responses/401"},
+                    "403": {"$ref": "#/components/responses/403"},
+                    "404": {"$ref": "#/components/responses/404"},
+                    "406": {"$ref": "#/components/responses/406"},
+                    "429": {"$ref": "#/components/responses/429"},
+                    "500": {"$ref": "#/components/responses/500"}
+                }
+            }
+        },
         "/merge-trees": {
             "post": {
                 "tags": [
