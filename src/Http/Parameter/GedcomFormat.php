@@ -54,7 +54,7 @@ use OpenApi\Attributes as OA;
 ),]
 class GedcomFormat
 {
-    public const string PARAM_DESCRIPTION    = 'The format of the GEDCOM data. Possible values are "gedcom" (GEDCOM 5.5.1), "gedcom-record" (default; single GEDCOM 5.5.1 record) "gedcom-x" (a JSON GEDCOM format defined by Familysearch), and "json" (identical to gedcom-x). "gedxom-x" and "json" are only supported for INDI and FAM records.';
+    public const string PARAM_DESCRIPTION    = 'The format of the GEDCOM data. Possible values are "gedcom" (complete GEDCOM 5.5.1 tree; requires allow-full-gedcom=true and confirm-full-gedcom=I_UNDERSTAND_FULL_GEDCOM), "gedcom-record" (default; single GEDCOM 5.5.1 record), "gedcom-x" (a JSON GEDCOM format defined by Familysearch), and "json" (identical to gedcom-x). "gedcom-x" and "json" are only supported for INDI and FAM records.';
     public const string FORMAT_GEDCOM        = 'gedcom';
     public const string FORMAT_GEDCOM_RECORD = 'gedcom-record';
     public const string FORMAT_GEDCOM_X      = 'gedcom-x';

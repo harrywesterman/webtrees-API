@@ -1716,6 +1716,20 @@
                     },
                     {
                         "$ref": "#/components/parameters/format"
+                    },
+                    {
+                        "name": "allow-full-gedcom",
+                        "in": "query",
+                        "description": "Required for format=gedcom.",
+                        "required": false,
+                        "schema": {"type": "boolean", "default": false}
+                    },
+                    {
+                        "name": "confirm-full-gedcom",
+                        "in": "query",
+                        "description": "Required confirmation for format=gedcom.",
+                        "required": false,
+                        "schema": {"type": "string", "enum": ["I_UNDERSTAND_FULL_GEDCOM"]}
                     }
                 ],
                 "responses": {

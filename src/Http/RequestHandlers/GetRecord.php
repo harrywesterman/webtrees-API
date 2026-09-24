@@ -200,6 +200,16 @@ class GetRecord implements WebtreesMcpToolRequestHandlerInterface
         $tree_name = Validator::queryParams($request)->string('tree', '');
         $xref      = Validator::queryParams($request)->string('xref', '');
         $format    = Validator::queryParams($request)->string('format', GedcomFormatParameter::DEFAULT_VALUE);
+        $allow_full_gedcom = Validator::queryParams($request)->boolean('allow-full-gedcom', false);
+        $confirm_full_gedcom = Validator::queryParams($request)->string('confirm-full-gedcom', '');
+
+        if ($format === GedcomFormatParameter::FORMAT_GEDCOM && (!$allow_full_gedcom || $confirm_full_gedcom !== 'I_UNDERSTAND_FULL_GEDCOM')) {
+            return api_response([
+                'error' => 'full_gedcom_requires_confirmation',
+                'message' => 'format=gedcom returns the complete tree and can overflow the client context. Use gedcom-record, or explicitly provide allow-full-gedcom=true and confirm-full-gedcom=I_UNDERSTAND_FULL_GEDCOM.',
+                'required-confirmation' => 'I_UNDERSTAND_FULL_GEDCOM',
+            ], StatusCodeInterface::STATUS_BAD_REQUEST);
+        }
 
         // Validate tree
         $tree_validation_response = QueryParamValidator::validateTreeName($this->tree_service, $tree_name);
@@ -294,6 +304,8 @@ class GetRecord implements WebtreesMcpToolRequestHandlerInterface
                         McpSchema::APPEND
                     ),
                     'format' => McpSchema::GEDCOM_FORMAT,
+                    'allow-full-gedcom' => ['type' => 'boolean', 'description' => 'Required together with confirm-full-gedcom for the potentially very large full-tree GEDCOM format.', 'default' => false],
+                    'confirm-full-gedcom' => ['type' => 'string', 'enum' => ['I_UNDERSTAND_FULL_GEDCOM'], 'description' => 'Required confirmation for format=gedcom.'],
                 ],
                 'required' => ['tree', 'xref']
             ],
