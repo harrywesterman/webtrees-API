@@ -240,7 +240,7 @@ class DeleteRecord implements WebtreesMcpToolRequestHandlerInterface
         I18N::init($current_language);
         Session::put('language', $current_language);
 
-        return api_response('Record deleted successfully.' . ($message ? ' ' . strip_tags($message) : ''), StatusCodeInterface::STATUS_OK);
+        return api_response(['xref' => $xref, 'state' => 'pending_delete', 'message' => 'Deletion requested; verify-write will report when it is applied.'], StatusCodeInterface::STATUS_ACCEPTED);
     }
 
     /**

@@ -67,6 +67,7 @@ class McpToolPermission implements MiddlewareInterface
             WebtreesApi::PATH_GET_PENDING_RECORD,
             WebtreesApi::PATH_GET_SOURCES,
             WebtreesApi::PATH_GET_CITATIONS,
+            WebtreesApi::PATH_VERIFY_WRITE,
         ];
 
         self::$mcp_write_tools = [

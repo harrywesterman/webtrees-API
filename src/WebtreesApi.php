@@ -92,6 +92,7 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ModifySource;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\GetSources;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\AddSourceCitation;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\GetCitations;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\VerifyWrite;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UnlinkChild;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UnlinkSpouse;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\McpTool;
@@ -208,6 +209,7 @@ class WebtreesApi extends AbstractModule implements
     public const string PATH_GET_SOURCES          = 'get-sources';
     public const string PATH_ADD_SOURCE_CITATION   = 'add-source-citation';
     public const string PATH_GET_CITATIONS         = 'get-citations';
+    public const string PATH_VERIFY_WRITE           = 'verify-write';
 
     //Prefences, Settings
 	public const string PREF_WEBTREES_API_TOKEN        = "webtrees_api_token";
@@ -293,6 +295,7 @@ class WebtreesApi extends AbstractModule implements
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_GET_SOURCES, GetSources::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_SOURCE_CITATION, AddSourceCitation::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_GET_CITATIONS, GetCitations::class, null, $api_middleware);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_VERIFY_WRITE, VerifyWrite::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_CHILD_TO_FAMILY, AddChildToFamily::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_CHILD_TO_INDI, AddChildToIndividual::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_PARENT_TO_INDI, AddParentToIndividual::class, null, $api_middleware);

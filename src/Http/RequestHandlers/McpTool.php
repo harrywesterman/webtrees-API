@@ -181,6 +181,9 @@ class McpTool implements RequestHandlerInterface
                 case WebtreesApi::PATH_GET_CITATIONS:
                     $handler = Registry::container()->get(GetCitations::class);
                     return $this->handleMcpTool($id, $request, $handler);
+                case WebtreesApi::PATH_VERIFY_WRITE:
+                    $handler = Registry::container()->get(VerifyWrite::class);
+                    return $this->handleMcpTool($id, $request, $handler);
                 case 'upload-media':
                 case 'upload-media-chunk':
                 case 'get-media':

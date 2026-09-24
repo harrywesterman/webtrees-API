@@ -43,6 +43,7 @@ use Jefferson49\Webtrees\Authorization\Auth;
 use Jefferson49\Webtrees\Helpers\Authorization;
 use Jefferson49\Webtrees\Helpers\Functions;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\GedcomRecordMutation;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\PendingChangeDetails;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Parameter\Gedcom as GedcomParameter;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Parameter\Note as NoteParameter;
@@ -326,7 +327,7 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
 
         $record->updateRecord($modified_gedcom, false);
 
-        return api_response(new XrefItem($record->xref()), StatusCodeInterface::STATUS_OK);
+        return api_response(array_merge(['xref' => $record->xref(), 'pending' => true], RecordVersion::fromGedcom($modified_gedcom)), StatusCodeInterface::STATUS_ACCEPTED);
     }
 
     /**
