@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers;
 
 use Fisharebest\Webtrees\Services\TreeService;
-use Jefferson49\Webtrees\Validator;
+use Fisharebest\Webtrees\Validator;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\SourceContext;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\SourceRecords;
 use Jefferson49\Webtrees\Module\WebtreesApi\WebtreesApi;
