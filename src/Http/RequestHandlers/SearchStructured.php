@@ -7,6 +7,7 @@ namespace Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers;
 use Fisharebest\Webtrees\DB;
 use Fisharebest\Webtrees\Registry;
 use Fisharebest\Webtrees\Services\TreeService;
+use Fisharebest\Webtrees\Tree;
 use Fisharebest\Webtrees\Validator;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\CheckAccess;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\QueryParamValidator;
@@ -45,16 +46,15 @@ final class SearchStructured implements WebtreesMcpToolRequestHandlerInterface
         $rows = [];
         foreach ($trees as $tree) {
             if (!ReadAccess::hasMemberScope($request) && CheckAccess::checkTreePrivacy($tree)->getStatusCode() !== 200) continue;
-            $records = DB::table('gedcom')->where('gedcom_id', $tree->id())->orderBy('xref')->get(['xref', 'gedcom_type', 'gedcom']);
-            foreach ($records as $row) {
-                $gedcom = (string) $row->gedcom;
+            foreach ($this->records($tree) as $row) {
+                $gedcom = $row['gedcom'];
                 if ($query !== '' && stripos($gedcom, $query) === false) continue;
                 if ($name !== '' && !$this->lineContains($gedcom, ['NAME'], $name)) continue;
                 if ($place !== '' && !$this->lineContains($gedcom, ['PLAC'], $place)) continue;
                 if ($occupation !== '' && !$this->lineContains($gedcom, ['OCCU'], $occupation)) continue;
                 if ($fullText !== '' && !$this->lineContains($gedcom, ['NOTE', 'TEXT', 'TITL', 'AUTH', 'PUBL'], $fullText)) continue;
                 if (!$this->yearMatches($gedcom, $yearFrom, $yearTo)) continue;
-                $record = Registry::gedcomRecordFactory()->make((string) $row->xref, $tree);
+                $record = Registry::gedcomRecordFactory()->make($row['xref'], $tree);
                 if ($record === null || CheckAccess::checkRecordAccess($record)->getStatusCode() !== 200) continue;
                 $rows[] = ['tree' => $tree->name(), 'xref' => $record->xref(), 'record-type' => $record->tag()];
             }
@@ -62,6 +62,23 @@ final class SearchStructured implements WebtreesMcpToolRequestHandlerInterface
         usort($rows, static fn (array $a, array $b): int => [$a['tree'], $a['xref']] <=> [$b['tree'], $b['xref']]);
         $total = count($rows);
         return api_response(['records' => array_slice($rows, $offset, $limit), 'offset' => $offset, 'limit' => $limit, 'total' => $total, 'has-more' => $offset + $limit < $total], 200);
+    }
+
+    /** @return array<int,array{xref:string,gedcom:string}> */
+    private function records(Tree $tree): array
+    {
+        $records = [];
+        foreach ([
+            ['individuals', 'i_file', 'i_id', 'i_gedcom'],
+            ['families', 'f_file', 'f_id', 'f_gedcom'],
+            ['sources', 's_file', 's_id', 's_gedcom'],
+        ] as [$table, $file, $xref, $gedcom]) {
+            foreach (DB::table($table)->where($file, $tree->id())->orderBy($xref)->get([$xref, $gedcom]) as $row) {
+                $records[] = ['xref' => (string) $row->{$xref}, 'gedcom' => (string) $row->{$gedcom}];
+            }
+        }
+        usort($records, static fn (array $a, array $b): int => $a['xref'] <=> $b['xref']);
+        return $records;
     }
 
     private function lineContains(string $gedcom, array $tags, string $needle): bool

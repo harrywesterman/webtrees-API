@@ -24,7 +24,7 @@ final class GetSources implements WebtreesMcpToolRequestHandlerInterface
         $tree = SourceContext::tree($this->tree_service, $request);
         if ($tree instanceof ResponseInterface) return $tree;
         $sources = [];
-        foreach (DB::table('gedcom')->where('gedcom_id', $tree->id())->where('gedcom_type', 'SOUR')->orderBy('xref')->pluck('xref') as $xref) {
+        foreach (DB::table('sources')->where('s_file', $tree->id())->orderBy('s_id')->pluck('s_id') as $xref) {
             $record = Registry::sourceFactory()->make((string) $xref, $tree);
             if ($record === null || ReadAccess::validateTree($request, $tree)->getStatusCode() !== 200) continue;
             preg_match('/^1 TITL (.*)$/m', $record->gedcom(), $title);

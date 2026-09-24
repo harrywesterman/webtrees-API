@@ -33,10 +33,10 @@ final class AddFamily implements WebtreesMcpToolRequestHandlerInterface
             $key = trim((string) ($input['idempotency-key'] ?? $input['idempotency_key'] ?? ''));
             if ($key === '' || !preg_match('/^[A-Za-z0-9._:-]{8,128}$/', $key)) return api_response('idempotency-key is required and must be 8-128 safe characters.', 400);
             $marker = '1 _WT_API_IDEMPOTENCY ' . $key;
-            $existing = DB::table('gedcom')->where('gedcom_id', $tree->id())->where('gedcom', 'like', '%' . $marker . '%')->get(['xref', 'gedcom_type']);
+            $existing = DB::table('families')->where('f_file', $tree->id())->where('f_gedcom', 'like', '%' . $marker . '%')->get(['f_id']);
             if ($existing->isNotEmpty()) {
-                $family = $existing->first(static fn (object $row): bool => $row->gedcom_type === 'FAM');
-                return api_response(['idempotent' => true, 'family-xref' => $family?->xref, 'record-xrefs' => $existing->pluck('xref')->values()->all()], 200);
+                $family = $existing->first();
+                return api_response(['idempotent' => true, 'family-xref' => $family->f_id, 'record-xrefs' => [$family->f_id]], 200);
             }
             if (!array_key_exists('husband', $input) && !array_key_exists('wife', $input) && empty($input['children'])) return api_response('At least one spouse or child is required.', 400);
             $result = DB::connection()->transaction(function () use ($tree, $input, $marker): array {

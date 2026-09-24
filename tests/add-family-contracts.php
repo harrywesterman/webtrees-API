@@ -15,4 +15,5 @@ check(str_contains($source, "1 CHIL"), 'CHIL links are built');
 check(str_contains($source, "'FAMS'"), 'FAMS links are built');
 check(str_contains($source, "'FAMC'"), 'FAMC links are built');
 check(str_contains($source, "'pending' => true"), 'Receipt identifies pending transaction');
+check(str_contains($source, "DB::table('families')"), 'Idempotency checks the families record table');
 echo "Add-family contract checks passed: {$checks}\n";
