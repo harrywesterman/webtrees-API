@@ -82,6 +82,7 @@ This README file contains the following main sections:
 |MCP/verify-write|Verify a write as `pending`, `applied`, `pending_delete`, or `deleted` using the returned SHA-256 record hash.|
 |MCP/search-structured|Search by name, place, year range, occupation, or full text in NOTE/source fields with stable offset/limit pagination and tree/XREF sorting.|
 |MCP/add-family|Create spouses, children, FAMS/FAMC/CHIL links and family notes in one transactional pending operation; repeat the idempotency key safely.|
+|MCP/upload-media-status|Inspect an owned resumable upload after a transport failure; reports receiving, committing/uncertain, or done without re-uploading.|
 |GET/convert-gedcom|Convert a GEDCOM file. |
 |POST/create-tree|Create a new tree on the webtrees server. |
 |DELETE/delete-record|Delete a GEDCOM record. |

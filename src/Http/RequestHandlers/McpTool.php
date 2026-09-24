@@ -190,6 +190,9 @@ class McpTool implements RequestHandlerInterface
                 case WebtreesApi::PATH_ADD_FAMILY:
                     $handler = Registry::container()->get(AddFamily::class);
                     return $this->handleMcpTool($id, $request, $handler);
+                case WebtreesApi::PATH_UPLOAD_MEDIA_STATUS:
+                    $handler = Registry::container()->get(UploadMediaStatus::class);
+                    return $this->handleMcpTool($id, $request, $handler);
                 case 'upload-media':
                 case 'upload-media-chunk':
                 case 'get-media':

@@ -159,6 +159,25 @@ final class MediaChunkStore
         }
     }
 
+    public function status(string $identity, string $id): ResponseInterface
+    {
+        if ($identity === '') throw new DomainException('Authenticated token identity required.', 403);
+        if (!preg_match('/^[a-fA-F0-9]{32}$/D', $id)) throw new DomainException('Invalid upload-id.', 400);
+        if (!is_dir($this->directory)) throw new DomainException('Upload not found or expired.', 404);
+        $path = $this->directory . '/' . strtolower($id) . '.json';
+        if (!is_file($path)) throw new DomainException('Upload not found or expired.', 404);
+        $lock = fopen($this->directory . '/store.lock', 'c+b');
+        if ($lock === false || !flock($lock, LOCK_EX)) throw new RuntimeException('Cannot lock upload storage.');
+        try {
+            $state = json_decode(file_get_contents($path), true, 32, JSON_THROW_ON_ERROR);
+            if (!hash_equals($state['owner'], hash('sha256', $identity))) throw new DomainException('Upload belongs to another token.', 403);
+            if ($state['expires'] <= time()) throw new DomainException('Upload not found or expired.', 410);
+            $payload = ['upload-id' => strtolower($id), 'state' => $state['status'], 'next-offset' => $state['offset'], 'total-bytes' => $state['metadata']['total-bytes'], 'sha256' => $state['metadata']['sha256'], 'expires-at' => $state['expires'], 'uncertain' => $state['status'] === 'committing'];
+            if ($state['status'] === 'done') $payload['response'] = json_decode($state['response']['body'], true);
+            return new Response(200, ['Content-Type' => 'application/json', 'Cache-Control' => 'private, no-store'], json_encode($payload, JSON_THROW_ON_ERROR));
+        } finally { flock($lock, LOCK_UN); fclose($lock); }
+    }
+
     private function validate(array $input): array
     {
         $allowed = ['upload-id', 'offset', 'content-base64', 'total-bytes', 'sha256', 'filename', 'tree', 'target-xref', 'target-type', 'title', 'note', 'date', 'final'];

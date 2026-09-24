@@ -63,6 +63,7 @@ function api_response(array|object|string $content = '', int $code = StatusCodeI
                     $code === StatusCodeInterface::STATUS_UNAUTHORIZED => 'token_invalid',
                     $code === StatusCodeInterface::STATUS_FORBIDDEN => 'scope_missing',
                     $code === StatusCodeInterface::STATUS_CONFLICT && str_contains(strtolower($content), 'protected') => 'protected_links_would_be_removed',
+                    $code === StatusCodeInterface::STATUS_CONFLICT && str_contains(strtolower($content), 'uncertain') => 'upload_commit_uncertain',
                     $code === StatusCodeInterface::STATUS_CONFLICT && str_contains(strtolower($content), 'pending') => 'pending_conflict',
                     $code === StatusCodeInterface::STATUS_CONFLICT => 'conflict',
                     $code === StatusCodeInterface::STATUS_PAYLOAD_TOO_LARGE => 'inline_upload_too_large',

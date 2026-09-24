@@ -70,6 +70,7 @@ class McpToolPermission implements MiddlewareInterface
             WebtreesApi::PATH_VERIFY_WRITE,
             WebtreesApi::PATH_SEARCH_STRUCTURED,
             WebtreesApi::PATH_ADD_FAMILY,
+            WebtreesApi::PATH_UPLOAD_MEDIA_STATUS,
         ];
 
         self::$mcp_write_tools = [

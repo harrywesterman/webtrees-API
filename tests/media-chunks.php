@@ -34,6 +34,7 @@ $commit = function ($file, $metadata) use (&$writes, $bytes) {
 try {
     $first = $store->accept('owner', $input, $commit);
     check(json_decode((string) $first->getBody(), true)['next-offset'] === 3, 'Acknowledged offset');
+    check(json_decode((string) $store->status('owner', $input['upload-id'])->getBody(), true)['state'] === 'receiving', 'Upload status reports receiving');
     check((string) $store->accept('owner', $input, $commit)->getBody() === (string) $first->getBody(), 'Chunk replay');
     rejects(fn () => $store->accept('other', $input, $commit), 403);
     rejects(fn () => $store->accept('owner', array_replace($input, ['offset' => 4, 'content-base64' => 'ZQ==']), $commit), 409);
@@ -43,6 +44,8 @@ try {
     $result = $store->accept('owner', $last, $commit);
     check($result->getStatusCode() === 201 && $writes === 1, 'Commit once');
     check((string) $store->accept('owner', $last, $commit)->getBody() === (string) $result->getBody() && $writes === 1, 'Final replay never commits twice');
+    $done = json_decode((string) $store->status('owner', $input['upload-id'])->getBody(), true);
+    check($done['state'] === 'done' && $done['response']['xref'] === 'M1', 'Upload status reports durable receipt');
     foreach ([['offset' => '0'], ['final' => 'false'], ['upload-id' => '../escape'], ['sha256' => 'bad'], ['content-base64' => "YQ==\n"]] as $bad) {
         rejects(fn () => $store->accept('owner', array_replace($input, $bad), $commit), 400);
     }
