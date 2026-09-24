@@ -80,6 +80,7 @@ This README file contains the following main sections:
 |MCP/get-citations|Read source citations, including event, page and note details.|
 |Errors|Error responses use `error.code` values such as `token_invalid`, `scope_missing`, `pending_conflict`, `protected_links_would_be_removed`, and `inline_upload_too_large`; the local MCP bridge preserves these codes.|
 |MCP/verify-write|Verify a write as `pending`, `applied`, `pending_delete`, or `deleted` using the returned SHA-256 record hash.|
+|MCP/search-structured|Search by name, place, year range, occupation, or full text in NOTE/source fields with stable offset/limit pagination and tree/XREF sorting.|
 |GET/convert-gedcom|Convert a GEDCOM file. |
 |POST/create-tree|Create a new tree on the webtrees server. |
 |DELETE/delete-record|Delete a GEDCOM record. |
