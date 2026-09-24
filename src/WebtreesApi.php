@@ -213,8 +213,8 @@ class WebtreesApi extends AbstractModule implements
     public const string REQUIRED_IMPORT_EXPORT_VERSION = '4.2.13';
 
 
-   /**
-     * WebtreesApi constructor.
+    /**
+     * Constructor
      */
     public function __construct()
     {
@@ -223,9 +223,11 @@ class WebtreesApi extends AbstractModule implements
     }
 
     /**
-     * Initialization.
+     * {@inheritDoc}
      *
      * @return void
+     *
+     * @see \Fisharebest\Webtrees\Module\AbstractModule::boot()
      */
     public function boot(): void
     {
