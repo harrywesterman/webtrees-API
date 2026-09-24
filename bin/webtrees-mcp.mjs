@@ -26,7 +26,15 @@ export class Bridge {
           'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
         body: JSON.stringify({ jsonrpc: '2.0', id, method, params }) });
     } catch { throw new Error('MCP transport failed. Upload outcome may be uncertain; inspect webtrees before uploading again.'); }
-    if (!response.ok) throw new Error(`MCP endpoint returned HTTP ${response.status}. Check token scopes and server settings.`);
+    if (!response.ok) {
+      let detail;
+      try { detail = await response.json(); } catch { detail = undefined; }
+      const remote = detail?.error;
+      if (remote && typeof remote === 'object' && typeof remote.code === 'string') {
+        throw new Error(`MCP error ${remote.code}: ${remote.message || 'request failed'}`);
+      }
+      throw new Error(`MCP endpoint returned HTTP ${response.status} (http_${response.status}). Check token scopes and server settings.`);
+    }
     let payload;
     try { payload = await response.json(); } catch { throw new Error('Invalid MCP response. Inspect webtrees before retrying an upload.'); }
     if (payload.jsonrpc !== '2.0' || payload.id !== id) throw new Error('Mismatched MCP response. Inspect webtrees before retrying an upload.');

@@ -54,6 +54,26 @@ function api_response(array|object|string $content = '', int $code = StatusCodeI
         $content = 'OK';
     }
 
+    // Keep failures machine-readable for API and MCP clients while retaining
+    // the original human-readable message.
+    if ($code >= 400 && is_string($content)) {
+        $content = [
+            'error' => [
+                'code' => match (true) {
+                    $code === StatusCodeInterface::STATUS_UNAUTHORIZED => 'token_invalid',
+                    $code === StatusCodeInterface::STATUS_FORBIDDEN => 'scope_missing',
+                    $code === StatusCodeInterface::STATUS_CONFLICT && str_contains(strtolower($content), 'protected') => 'protected_links_would_be_removed',
+                    $code === StatusCodeInterface::STATUS_CONFLICT && str_contains(strtolower($content), 'pending') => 'pending_conflict',
+                    $code === StatusCodeInterface::STATUS_CONFLICT => 'conflict',
+                    $code === StatusCodeInterface::STATUS_PAYLOAD_TOO_LARGE => 'inline_upload_too_large',
+                    $code >= 500 => 'internal_error',
+                    default => 'invalid_request',
+                },
+                'message' => $content,
+            ],
+        ];
+    }
+
     // As a default, webtrees-API returns text/plain. Avoid that webtrees response will return text/HTML as content-type
     if (is_string($content)) {
         $headers['content-type'] ??= 'text/plain';

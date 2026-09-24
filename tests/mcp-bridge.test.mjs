@@ -107,3 +107,10 @@ test('direct chunk invocation is refused and RPC response IDs are checked', asyn
   await assert.rejects(b.handle({ method: 'tools/call', params: { name: 'upload-media-chunk', arguments: {} } }), /internal/);
   await assert.rejects(b.rpc('tools/list'), /Mismatched/);
 });
+
+test('preserves structured error codes from non-success HTTP responses', async () => {
+  const b = new Bridge({ endpoint: 'https://example.test/mcp', token: 'test', fetchImpl: async () => ({
+    ok: false, status: 409, json: async () => ({ error: { code: 'pending_conflict', message: 'Pending change exists.' } }),
+  }) });
+  await assert.rejects(b.rpc('tools/list'), /pending_conflict: Pending change exists/);
+});

@@ -78,6 +78,7 @@ This README file contains the following main sections:
 |MCP/get-sources|List first-class source records in a tree.|
 |MCP/add-source-citation|Link a source to an INDI/FAM record or a specific event; duplicate links are no-ops.|
 |MCP/get-citations|Read source citations, including event, page and note details.|
+|Errors|Error responses use `error.code` values such as `token_invalid`, `scope_missing`, `pending_conflict`, `protected_links_would_be_removed`, and `inline_upload_too_large`; the local MCP bridge preserves these codes.|
 |GET/convert-gedcom|Convert a GEDCOM file. |
 |POST/create-tree|Create a new tree on the webtrees server. |
 |DELETE/delete-record|Delete a GEDCOM record. |
