@@ -2,11 +2,11 @@
 
 Run `bin/webtrees-mcp.mjs` with Node.js 22 or newer as the local stdio MCP server.
 It forwards the existing webtrees tools and exposes `upload-media` with a
-`local-path` argument. The bridge reads the image itself, hashes it, and sends
-256 KiB chunks to the authenticated remote `upload-media-chunk` MCP tool.
-Neither image bytes nor base64 need to pass through the model. No REST upload
-endpoint or `api_write` scope is used. Uploads require `mcp_write` and the normal
-technical-user write permissions. Pending reads require `mcp_read_member`.
+`local-path` argument. The bridge reads the image itself, asks the remote
+`create-media-upload` MCP tool for a single-use signed URL, and PUTs the raw
+bytes to that URL. Neither image bytes nor base64 pass through the model. No REST
+upload endpoint or `api_write` scope is used. Uploads require `mcp_write` and the
+normal technical-user write permissions. Pending reads require `mcp_read_member`.
 
 Example OpenCode configuration for the installed v1 configuration layout:
 
@@ -35,7 +35,8 @@ The remote URL is fixed by configuration, HTTPS-only, and redirects are refused.
 
 Restart the client to load the local bridge. `tools/list` should show
 `upload-media` with `local-path`, rather than `content-base64`. Other tools keep
-their names. The internal chunk tool is not exposed to the model.
+their names. The internal `upload-media-chunk` and `create-media-upload` tools
+are not exposed to the model; the bridge uses them itself.
 
 Example instruction:
 
@@ -44,7 +45,7 @@ Example instruction:
 > returned media XREF and report pending approval. Do not resize, re-encode or
 > upload twice. Leave both the media record and target link pending for review.
 
-Files remain limited to 20 MiB, 40 megapixels and valid JPEG/PNG/GIF/WebP content.
+Files remain limited to 20 MiB, 40 megapixels and valid JPEG/PNG/GIF/WebP content (PDF is also accepted and stored without decoding).
 The same Media handler performs validation, storage and transactional linking.
 An incomplete transfer does not create a media record. A successful transfer
 creates pending changes; approve media and target link together in webtrees.

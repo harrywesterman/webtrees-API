@@ -15,6 +15,7 @@ use Fisharebest\Webtrees\Services\TreeService;
 use Fisharebest\Webtrees\Tree;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\CheckAccess;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaInput;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaToken;
 use Jefferson49\Webtrees\Module\WebtreesApi\OAuth2\Repositories\ScopeRepository as Scopes;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -31,6 +32,11 @@ use function Jefferson49\Webtrees\Module\WebtreesApi\Helpers\api_response;
 /** Transport adapter and shared media operations. Never auto-accept genealogy edits. */
 class Media implements RequestHandlerInterface
 {
+    // Must match WebtreesApi::PATH_MEDIA_CONTENT / PATH_MEDIA_PREVIEW, which are
+    // registered as routes. Kept local so listing does not load the module class.
+    private const string PATH_CONTENT = 'media/content';
+    private const string PATH_PREVIEW = 'media/preview';
+
     public function __construct(private TreeService $trees, private LinkedRecordService $links) {}
 
     public function handle(ServerRequestInterface $request): ResponseInterface
@@ -103,7 +109,29 @@ class Media implements RequestHandlerInterface
                 // mediaFiles() applies fact privacy; never return raw GEDCOM or private FILE paths.
                 $files = [];
                 foreach ($this->visibleFiles($record, $privacy) as $file) {
-                    $files[] = ['filename' => $file->filename(), 'title' => $file->title()];
+                    $name = $file->filename();
+                    $entry = ['filename' => $name, 'title' => $file->title()];
+                    // Signed, short-lived URLs let a client view or fetch the image
+                    // without downloading bytes (or base64) through the model context.
+                    try {
+                        $filesystem = $tree->mediaFilesystem();
+                        if ($filesystem->fileExists($name)) {
+                            $entry['mime-type'] = MediaInput::mimeForName($name);
+                            $entry['bytes'] = $filesystem->fileSize($name);
+                            $content_url = $this->capabilityUrl($request, 'content', $tree, $record->xref(), $name);
+                            $preview_url = $this->capabilityUrl($request, 'preview', $tree, $record->xref(), $name);
+                            if ($content_url !== '') {
+                                $entry['content-url'] = $content_url;
+                                $entry['expires-at'] = time() + MediaToken::TTL;
+                            }
+                            if ($preview_url !== '') {
+                                $entry['preview-url'] = $preview_url;
+                            }
+                        }
+                    } catch (Throwable) {
+                        // A single unreadable file must not break the listing.
+                    }
+                    $files[] = $entry;
                 }
                 $metadata = [];
                 $level = $privacy ? Auth::PRIV_PRIVATE : Authorization::accessLevelForTree($tree);
@@ -123,8 +151,32 @@ class Media implements RequestHandlerInterface
                 if (!$filesystem->fileExists($name)) {
                     throw new DomainException('Media file not found on storage.', 404);
                 }
+                if ($mcp) {
+                    // Return a signed URL, not the bytes: the MCP result must stay
+                    // small and the binary must never enter the model context.
+                    $url = $this->capabilityUrl($request, 'content', $tree, $record->xref(), $name);
+                    if ($url !== '') {
+                        return api_response([
+                            'filename' => basename($name),
+                            'bytes' => $filesystem->fileSize($name),
+                            'sha256' => $this->sha256Stream($filesystem->readStream($name)),
+                            'content-url' => $url,
+                            'expires-at' => time() + MediaToken::TTL,
+                        ], 200);
+                    }
+                    // Fallback for installations without a signing key or base URL.
+                    $bytes = $filesystem->read($name);
+                    return api_response([
+                        'filename' => basename($name),
+                        'bytes' => strlen($bytes),
+                        'sha256' => hash('sha256', $bytes),
+                        'content-base64' => base64_encode($bytes),
+                    ], 200);
+                }
+                $mime = MediaInput::mimeForName($name);
+                $disposition = MediaInput::isDocument($mime) ? 'attachment' : 'inline';
                 $stream = $filesystem->readStream($name);
-                return new Response(200, ['Content-Type' => 'application/octet-stream', 'Content-Disposition' => 'attachment', 'X-Content-Type-Options' => 'nosniff', 'Cache-Control' => 'private, no-store'], $stream);
+                return new Response(200, ['Content-Type' => $mime, 'Content-Disposition' => $disposition . '; filename="' . basename($name) . '"', 'X-Content-Type-Options' => 'nosniff', 'Cache-Control' => 'private, no-store'], $stream);
             }
             $this->editable($record);
             if ($action === 'update-media') {
@@ -209,7 +261,8 @@ class Media implements RequestHandlerInterface
                     'message' => 'Send the local image as multipart/form-data to POST /api/media. Do not place base64 or secrets in the MCP request or a URL.',
                 ], 413);
             }
-            $name = MediaInput::filename(MediaInput::text($input, 'filename'));
+            $input['orig'] = MediaInput::text($input, 'filename');
+            $name = MediaInput::filename($input['orig']);
             $bytes = MediaInput::base64($encoded);
         } else {
             $file = $chunkFile ?? ($request->getUploadedFiles()['file'] ?? null);
@@ -219,7 +272,8 @@ class Media implements RequestHandlerInterface
             if (!$file instanceof UploadedFileInterface || $file->getError() !== UPLOAD_ERR_OK) {
                 throw new DomainException('A successful multipart file upload is required; check PHP upload/post limits.', 400);
             }
-            $name = MediaInput::filename($file->getClientFilename() ?? '');
+            $input['orig'] = $file->getClientFilename() ?? '';
+            $name = MediaInput::filename($input['orig']);
             $stream = $file->getStream();
             $bytes = '';
             while (!$stream->eof() && strlen($bytes) <= MediaInput::REST_LIMIT) {
@@ -228,7 +282,27 @@ class Media implements RequestHandlerInterface
                 $bytes .= $part;
             }
         }
-        $mime = MediaInput::image($bytes, $name, $mcp && !$chunkFile instanceof UploadedFileInterface ? MediaInput::MCP_INLINE_LIMIT : MediaInput::REST_LIMIT);
+        return $this->persistUpload($tree, $target, $input, $bytes, $name, $mcp && !$chunkFile instanceof UploadedFileInterface ? MediaInput::MCP_INLINE_LIMIT : MediaInput::REST_LIMIT);
+    }
+
+    /** Validate a staged-upload target before a signed upload URL is minted. */
+    public function validateUploadTarget(Tree $tree, array $input): void
+    {
+        $this->editable($this->target($tree, $input));
+    }
+
+    /** Commit raw bytes supplied by the signed staged-upload route. */
+    public function commitUpload(Tree $tree, array $input, string $bytes, string $name, int $limit): ResponseInterface
+    {
+        $target = $this->target($tree, $input);
+        $this->editable($target);
+        return $this->persistUpload($tree, $target, $input, $bytes, $name, $limit);
+    }
+
+    /** Store validated bytes and create the pending media record and target link. */
+    private function persistUpload(Tree $tree, GedcomRecord $target, array $input, string $bytes, string $name, int $limit): ResponseInterface
+    {
+        $mime = MediaInput::file($bytes, $name, $limit);
         // A random directory preserves the readable basename without ever replacing an existing file.
         $path = 'api-media/' . bin2hex(random_bytes(16)) . '/' . $name;
         $fs = $tree->mediaFilesystem();
@@ -236,6 +310,11 @@ class Media implements RequestHandlerInterface
             throw new DomainException('Upload path collision; retry with a new request.', 409);
         }
         $gedcom = "0 @@ OBJE\n1 FILE " . $path . "\n2 FORM " . strtoupper(pathinfo($name, PATHINFO_EXTENSION));
+        // Keep the original client filename for provenance; the storage path may be sanitized.
+        $original = (string) ($input['orig'] ?? '');
+        if ($original !== '' && $original !== $name) {
+            $gedcom .= "\n" . MediaInput::field(2, '_ORIG', MediaInput::text(['orig' => $original], 'orig'));
+        }
         foreach (['title' => [2, 'TITL'], 'note' => [1, 'NOTE'], 'date' => [1, '_DATE']] as $key => [$level, $tag]) {
             $value = MediaInput::text($input, $key);
             if ($value !== '') { $gedcom .= "\n" . MediaInput::field($level, $tag, $value); }
@@ -290,9 +369,13 @@ class Media implements RequestHandlerInterface
                 if ($bytes === false || base64_encode($bytes) !== $encoded) throw new DomainException('content-base64 must be canonical base64.', 400);
                 $total += strlen($bytes);
                 if ($total > MediaInput::REST_LIMIT) throw new DomainException('The batch exceeds the 20 MiB total limit.', 413);
-                $mime = MediaInput::image($bytes, $name, MediaInput::REST_LIMIT);
+                $mime = MediaInput::file($bytes, $name, MediaInput::REST_LIMIT);
                 $path = 'api-media/' . bin2hex(random_bytes(16)) . '/' . $name;
                 $gedcom = "0 @@ OBJE\n1 FILE " . $path . "\n2 FORM " . strtoupper(pathinfo($name, PATHINFO_EXTENSION));
+                $original = is_string($file['filename'] ?? null) ? $file['filename'] : '';
+                if ($original !== '' && $original !== $name) {
+                    $gedcom .= "\n" . MediaInput::field(2, '_ORIG', MediaInput::text(['orig' => $original], 'orig'));
+                }
                 foreach (['title' => [2, 'TITL'], 'note' => [1, 'NOTE'], 'date' => [1, '_DATE']] as $key => [$level, $tag]) {
                     if (array_key_exists($key, $file)) {
                         $value = MediaInput::text($file, $key);
@@ -367,6 +450,43 @@ class Media implements RequestHandlerInterface
         $level = $privacy ? Auth::PRIV_PRIVATE : Authorization::accessLevelForTree($record->tree());
         return Functions::getRecordFacts($record, ['FILE'], false, $level, true)
             ->map(fn ($fact) => new MediaFile($fact->gedcom(), $record));
+    }
+
+    /** Mint a short-lived signed URL for a visible media file, or '' when unavailable. */
+    private function capabilityUrl(ServerRequestInterface $request, string $op, Tree $tree, string $xref, string $file): string
+    {
+        $key = MediaToken::moduleKey();
+        $base = rtrim((string) $request->getAttribute('base_url', ''), '/');
+        if ($key === '' || $base === '') {
+            return '';
+        }
+        $token = MediaToken::sign(['op' => $op, 'tree' => $tree->name(), 'xref' => $xref, 'file' => $file], $key);
+        $path = $op === 'preview' ? self::PATH_PREVIEW : self::PATH_CONTENT;
+        return $base . '/api/' . $path . '?token=' . rawurlencode($token);
+    }
+
+    /** Hash a Flysystem resource or PSR-7 stream without loading it all into memory. */
+    private function sha256Stream(mixed $stream): string
+    {
+        $context = hash_init('sha256');
+        if (is_resource($stream)) {
+            while (!feof($stream)) {
+                $chunk = fread($stream, 65536);
+                if ($chunk === false || $chunk === '') {
+                    break;
+                }
+                hash_update($context, $chunk);
+            }
+        } else {
+            while (!$stream->eof()) {
+                $chunk = $stream->read(65536);
+                if ($chunk === '') {
+                    break;
+                }
+                hash_update($context, $chunk);
+            }
+        }
+        return hash_final($context);
     }
 
     /** Serialize media writes per tree and reject pending changes missed by cached record objects. */

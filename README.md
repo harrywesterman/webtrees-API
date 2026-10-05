@@ -98,16 +98,22 @@ This README file contains the following main sections:
 |GET/list-pending-changes|List pending approval-queue changes for a tree, optionally filtered by record.|
 |GET/get-pending-record|Read the pending GEDCOM changes for a record.|
 |DELETE/cancel-pending|Cancel pending changes for a record before moderator approval.|
-|MCP/download-media|Download a visible media file to a local temporary file through the local MCP bridge.|
+|MCP/download-media|Get a short-lived signed URL for a visible media file; no base64 enters the model. The local MCP bridge writes the fetched bytes to a local temporary file.|
+|MCP/create-media-upload|Create a single-use signed URL for a raw image/PDF upload, so no base64 enters the model.|
 |MCP/upload-media-batch|Upload multiple local images and submit one combined pending change for one target.|
+|MCP/upload-media-status|Inspect an owned resumable upload after a transport failure without re-uploading.|
 |GET/get-record|`gedcom-record` remains the default. Full-tree `format=gedcom` requires explicit `allow-full-gedcom=true` plus `confirm-full-gedcom=I_UNDERSTAND_FULL_GEDCOM`.|
 |POST/merge-trees|Merge two trees. |
 |PUT/modify-record|Modify the GEDCOM data of a record. Existing FAMS/FAMC/OBJE/CHIL links are preserved by default; use `remove-protected-links=true` for an explicit removal or `dry-run=true` for a preview.|
 |POST/media|Upload an image, create an OBJE record, and submit its link to an individual, family, or source for approval.|
-|GET/media|Retrieve media metadata and its webtrees URL.|
+|GET/media|Retrieve media metadata, its webtrees URL, and short-lived signed preview/content URLs.|
 |PUT/media|Update media title, date, or note.|
 |DELETE/media|Request deletion of an unlinked OBJE record; retain the file for review and shared references.|
 |GET/media/download|Download a visible media file with authentication.|
+|GET/media/content|Stream a visible media file via a signed, short-lived token.|
+|GET/media/preview|Stream a bounded JPEG thumbnail via a signed, short-lived token.|
+|PUT/media/upload|Receive raw bytes for a signed staged upload.|
+|POST/media/cleanup|List or delete unreferenced api-media files (scope `api_import`; dry-run by default).|
 |POST/media/links|Submit a record-level media link for approval.|
 |DELETE/media/links|Submit removal of a record-level media link for approval.|
 |POST/renumber-xrefs|Renumber the XREFs in a tree. |

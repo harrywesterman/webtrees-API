@@ -3,7 +3,7 @@
 import { mkdtemp, open, realpath, stat, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { delimiter, resolve, relative, isAbsolute, basename, join } from 'node:path';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -43,8 +43,8 @@ export class Bridge {
   }
   async list() {
     const result = await this.rpc('tools/list');
-    if (!result.tools.some(t => t.name === 'upload-media-chunk')) throw new Error('Server upgrade required: upload-media-chunk is missing.');
-    return { tools: result.tools.filter(t => t.name !== 'upload-media-chunk').map(t => {
+    if (!result.tools.some(t => t.name === 'create-media-upload')) throw new Error('Server upgrade required: create-media-upload is missing.');
+    return { tools: result.tools.filter(t => t.name !== 'upload-media-chunk' && t.name !== 'create-media-upload').map(t => {
       if (t.name === 'download-media') {
         return { ...t, description: 'Download a visible media file and write it to a local temporary file. Supply the exact filename returned by get-media; the response contains local-path, bytes, and sha256, never base64.',
           outputSchema: { type: 'object', properties: { 'local-path': { type: 'string' }, bytes: { type: 'integer' }, sha256: { type: 'string' } }, required: ['local-path', 'bytes', 'sha256'] } };
@@ -58,7 +58,7 @@ export class Bridge {
       if (t.name !== 'upload-media') return t;
       const properties = { ...t.inputSchema.properties };
       delete properties['content-base64']; delete properties.filename;
-      properties['local-path'] = { type: 'string', description: 'Absolute path to a local JPEG/PNG/GIF/WebP file within WEBTREES_UPLOAD_ROOTS. Up to 20 MiB. The bridge reads and transfers bytes automatically over MCP.' };
+      properties['local-path'] = { type: 'string', description: 'Absolute path to a local JPEG/PNG/GIF/WebP/PDF file within WEBTREES_UPLOAD_ROOTS. Up to 20 MiB. The bridge reads and transfers bytes automatically over MCP.' };
       return { ...t, description: 'Upload a local image through MCP and link to a verified INDI/FAM/SOUR. Supply local-path, never base64. Requires mcp_write, no api_write. Verify tree and target first. BOTH media and link await approval. Do not retry uncertain uploads.',
         inputSchema: { type: 'object', properties, required: ['tree', 'target-xref', 'target-type', 'local-path'], additionalProperties: false } };
     }) };
@@ -70,7 +70,7 @@ export class Bridge {
     if (!roots.some(root => { const rel = relative(root, path); return rel && !rel.startsWith('..') && !isAbsolute(rel) && !rel.split(/[\\/]/).some(p => p.startsWith('.')); })) {
       throw new Error('File is outside permitted upload roots, or in a hidden directory. Configure WEBTREES_UPLOAD_ROOTS.');
     }
-    if (!/\.(jpe?g|png|gif|webp)$/i.test(path)) throw new Error('Only JPEG, PNG, GIF and WebP files can be uploaded.');
+    if (!/\.(jpe?g|png|gif|webp|pdf)$/i.test(path)) throw new Error('Only JPEG, PNG, GIF, WebP and PDF files can be uploaded.');
     const expected = await stat(path);
     const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     let bytes;
@@ -85,23 +85,35 @@ export class Bridge {
       if (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs) throw new Error('Image changed while reading.');
     } finally { await handle.close(); }
     const metadata = Object.fromEntries(['tree','target-xref','target-type','title','note','date'].filter(k => args[k] !== undefined).map(k => [k,args[k]]));
-    const uploadId = Math.floor(Date.now() / 1000).toString(16).padStart(8, '0') + randomBytes(12).toString('hex');
-    const common = { ...metadata, 'upload-id': uploadId, filename: basename(path), 'total-bytes': bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
-    let result;
-    for (let offset = 0; offset < bytes.length; offset += CHUNK) {
-      result = await this.rpc('tools/call', { name: 'upload-media-chunk', arguments: { ...common, offset,
-        'content-base64': bytes.subarray(offset, offset + CHUNK).toString('base64'), final: offset + CHUNK >= bytes.length } });
-      if (result.isError) return result;
-      let receipt;
-      try { receipt = JSON.parse(result.content.find(c => c.type === 'text').text); }
-      catch { throw new Error('Invalid upload acknowledgement. Inspect webtrees before retrying.'); }
-      if (offset + CHUNK < bytes.length) {
-        if (receipt['upload-id'] !== uploadId || receipt['next-offset'] !== offset + CHUNK || receipt.complete !== false) throw new Error('Incorrect chunk acknowledgement. Upload stopped.');
-      } else if (typeof receipt.xref !== 'string' || !receipt.xref || receipt.pending !== true || receipt['target-xref'] !== args['target-xref']) {
-        throw new Error('Missing final media receipt. Inspect webtrees before retrying.');
-      }
+    // Staged raw upload: mint a signed URL, then PUT the bytes directly so no
+    // base64 ever travels through the model or the JSON-RPC request.
+    const staged = await this.rpc('tools/call', { name: 'create-media-upload', arguments: { ...metadata, filename: basename(path) } });
+    if (staged.isError) return staged;
+    let receipt = staged.structuredContent;
+    if (!receipt) {
+      try { receipt = JSON.parse(staged.content.find(c => c.type === 'text').text); }
+      catch { throw new Error('Invalid staged-upload response.'); }
     }
-    return result;
+    if (typeof receipt['upload-url'] !== 'string' || !receipt['upload-url'] || !Number.isInteger(receipt['max-bytes']) || bytes.length > receipt['max-bytes']) {
+      throw new Error('Server refused a staged upload URL for this file.');
+    }
+    const contentType = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' }[basename(path).split('.').pop().toLowerCase()] ?? 'application/octet-stream';
+    let response;
+    try {
+      response = await this.fetch(receipt['upload-url'], { method: 'PUT', redirect: 'error',
+        signal: AbortSignal.timeout(120000), headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': contentType }, body: bytes });
+    } catch { throw new Error('Staged upload transport failed. Inspect webtrees before uploading again.'); }
+    let payload;
+    try { payload = await response.json(); } catch { payload = undefined; }
+    if (!response.ok) {
+      const remote = payload?.error;
+      if (remote && typeof remote.code === 'string') throw new Error(`MCP error ${remote.code}: ${remote.message || 'upload failed'}`);
+      throw new Error(`Staged upload returned HTTP ${response.status}. Inspect webtrees before retrying.`);
+    }
+    if (typeof payload?.xref !== 'string' || !payload.xref || payload.pending !== true || payload['target-xref'] !== args['target-xref']) {
+      throw new Error('Missing final media receipt. Inspect webtrees before retrying.');
+    }
+    return { isError: false, content: [{ type: 'text', text: JSON.stringify(payload) }], structuredContent: payload };
   }
   async readLocal(inputPath) {
     if (typeof inputPath !== 'string' || !isAbsolute(inputPath)) throw new Error('local-path must be an absolute file path.');
@@ -110,7 +122,7 @@ export class Bridge {
     if (!roots.some(root => { const rel = relative(root, path); return rel && !rel.startsWith('..') && !isAbsolute(rel) && !rel.split(/[\\/]/).some(p => p.startsWith('.')); })) {
       throw new Error('File is outside permitted upload roots, or in a hidden directory. Configure WEBTREES_UPLOAD_ROOTS.');
     }
-    if (!/\.(jpe?g|png|gif|webp)$/i.test(path)) throw new Error('Only JPEG, PNG, GIF and WebP files can be uploaded.');
+    if (!/\.(jpe?g|png|gif|webp|pdf)$/i.test(path)) throw new Error('Only JPEG, PNG, GIF, WebP and PDF files can be uploaded.');
     const expected = await stat(path);
     const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
@@ -133,18 +145,36 @@ export class Bridge {
       try { payload = JSON.parse(result.content.find(c => c.type === 'text').text); }
       catch { throw new Error('Invalid download response.'); }
     }
-    if (typeof payload['content-base64'] !== 'string' || typeof payload.filename !== 'string' || typeof payload.sha256 !== 'string' || !Number.isInteger(payload.bytes)) {
-      throw new Error('Download response is missing file bytes or checksum.');
+    if (typeof payload.filename !== 'string' || typeof payload.sha256 !== 'string' || !Number.isInteger(payload.bytes)) {
+      throw new Error('Download response is missing a filename, size or checksum.');
     }
     if (!/^[^/\\.][^/\\]*\.[A-Za-z0-9]+$/.test(payload.filename)) throw new Error('Download response contains an unsafe filename.');
-    const bytes = Buffer.from(payload['content-base64'], 'base64');
-    if (bytes.toString('base64') !== payload['content-base64'] || bytes.length !== payload.bytes || createHash('sha256').update(bytes).digest('hex') !== payload.sha256) {
+    let bytes;
+    if (typeof payload['content-url'] === 'string') {
+      // Preferred path: fetch the signed URL directly so no base64 enters the model.
+      let response;
+      try {
+        response = await this.fetch(payload['content-url'], { method: 'GET', redirect: 'error',
+          signal: AbortSignal.timeout(60000), headers: { Authorization: `Bearer ${this.token}` } });
+      } catch { throw new Error('Media download transport failed; inspect webtrees before retrying.'); }
+      if (!response.ok) throw new Error(`Media download returned HTTP ${response.status}.`);
+      bytes = Buffer.from(await response.arrayBuffer());
+    } else if (typeof payload['content-base64'] === 'string') {
+      // Legacy fallback for installations without signed URLs.
+      bytes = Buffer.from(payload['content-base64'], 'base64');
+      if (bytes.toString('base64') !== payload['content-base64']) throw new Error('Download response contained invalid base64.');
+    } else {
+      throw new Error('Download response is missing content-url.');
+    }
+    if (bytes.length !== payload.bytes || createHash('sha256').update(bytes).digest('hex') !== payload.sha256) {
       throw new Error('Downloaded bytes failed checksum verification.');
     }
     const directory = await mkdtemp(join(tmpdir(), 'webtrees-download-'));
     const path = join(directory, basename(payload.filename));
     await writeFile(path, bytes, { mode: 0o600 });
     delete payload['content-base64'];
+    delete payload['content-url'];
+    delete payload['expires-at'];
     const local = { ...payload, 'local-path': path };
     return { ...result, structuredContent: local, content: [{ type: 'text', text: JSON.stringify(local) }] };
   }

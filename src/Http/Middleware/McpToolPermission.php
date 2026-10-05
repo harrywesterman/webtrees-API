@@ -74,7 +74,7 @@ class McpToolPermission implements MiddlewareInterface
         ];
 
         self::$mcp_write_tools = [
-            'upload-media', 'upload-media-chunk', 'update-media', 'link-media', 'unlink-media', 'delete-media',
+            'upload-media', 'upload-media-chunk', 'create-media-upload', 'update-media', 'link-media', 'unlink-media', 'delete-media',
             WebtreesApi::PATH_MODIFY_RECORD,
             WebtreesApi::PATH_ADD_UNLINKED_RECORD,
             WebtreesApi::PATH_ADD_CHILD_TO_INDI,

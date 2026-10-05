@@ -15,6 +15,39 @@ final class MediaInput
     public const int MCP_LIMIT = self::MCP_INLINE_LIMIT;
     public const int REST_LIMIT = 20 * 1024 * 1024;
     private const array TYPES = ['image/jpeg' => ['jpg', 'jpeg'], 'image/png' => ['png'], 'image/gif' => ['gif'], 'image/webp' => ['webp']];
+    /** Documents are stored and linked as-is; they are never decoded. */
+    private const array DOCUMENT_TYPES = ['application/pdf' => ['pdf']];
+
+    public static function mimeForName(string $name): string
+    {
+        $extension = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+        foreach (self::TYPES + self::DOCUMENT_TYPES as $mime => $extensions) {
+            if (in_array($extension, $extensions, true)) {
+                return $mime;
+            }
+        }
+        return 'application/octet-stream';
+    }
+
+    public static function isDocument(string $mime): bool
+    {
+        return isset(self::DOCUMENT_TYPES[$mime]);
+    }
+
+    /** Validate an uploaded image or a supported document and return its MIME type. */
+    public static function file(string $bytes, string $name, int $limit): string
+    {
+        if (strtolower(pathinfo($name, PATHINFO_EXTENSION)) === 'pdf') {
+            if ($bytes === '' || strlen($bytes) > $limit) {
+                throw new DomainException('Empty file or upload size limit exceeded.', 413);
+            }
+            if (!str_starts_with($bytes, '%PDF-')) {
+                throw new DomainException('File content and extension must match a PDF document.', 415);
+            }
+            return 'application/pdf';
+        }
+        return self::image($bytes, $name, $limit);
+    }
 
     public static function filename(string $name): string
     {
@@ -41,15 +74,8 @@ final class MediaInput
         if ($info[0] <= 0 || $info[1] <= 0 || $info[0] * $info[1] > 40000000) {
             throw new DomainException('Image exceeds the 40 megapixel limit.', 413);
         }
-        $memoryLimit = ini_parse_quantity(ini_get('memory_limit'));
-        if ($memoryLimit > 0 && memory_get_usage(true) + $info[0] * $info[1] * 8 + strlen($bytes) * 2 > $memoryLimit) {
-            throw new DomainException('Image needs more decoding memory than this server allows.', 413);
-        }
-        $decoded = @imagecreatefromstring($bytes);
-        if ($decoded === false) {
-            throw new DomainException('Image data cannot be decoded.', 415);
-        }
-        unset($decoded);
+        // Validate from the image header only. Decoding is deferred to the bounded
+        // preview generator, so a large decompression bomb never allocates memory.
         return $mime;
     }
 

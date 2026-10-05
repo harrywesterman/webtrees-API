@@ -144,8 +144,9 @@ class McpTool implements RequestHandlerInterface
             ->withAttribute('webtrees_api_transport', ReadAccess::TRANSPORT_MCP)
             ->withAttribute('oauth_scopes', $scopes)
             ->withQueryParams($arguments);
-        // Preserve only authenticated identity, never values supplied in tool arguments.
-        foreach (['oauth_client_id', 'oauth_user_id', 'oauth_access_token_id'] as $attribute) {
+        // Preserve only authenticated identity and the server-derived base URL,
+        // never values supplied in tool arguments.
+        foreach (['oauth_client_id', 'oauth_user_id', 'oauth_access_token_id', 'base_url'] as $attribute) {
             $request = $request->withAttribute($attribute, $original->getAttribute($attribute));
         }
 
@@ -195,6 +196,7 @@ class McpTool implements RequestHandlerInterface
                     return $this->handleMcpTool($id, $request, $handler);
                 case 'upload-media':
                 case 'upload-media-chunk':
+                case 'create-media-upload':
                 case 'get-media':
                 case WebtreesApi::PATH_DOWNLOAD_MEDIA:
                 case WebtreesApi::PATH_UPLOAD_MEDIA_BATCH:
@@ -202,7 +204,8 @@ class McpTool implements RequestHandlerInterface
                 case 'link-media':
                 case 'unlink-media':
                 case 'delete-media':
-                    $media_handlers = ['upload-media' => UploadMedia::class, 'upload-media-chunk' => UploadMediaChunk::class, 'get-media' => GetMedia::class,
+                    $media_handlers = ['upload-media' => UploadMedia::class, 'upload-media-chunk' => UploadMediaChunk::class,
+                        'create-media-upload' => CreateMediaUpload::class, 'get-media' => GetMedia::class,
                         WebtreesApi::PATH_DOWNLOAD_MEDIA => DownloadMedia::class,
                         WebtreesApi::PATH_UPLOAD_MEDIA_BATCH => UploadMediaBatch::class,
                         'update-media' => UpdateMedia::class, 'link-media' => LinkMedia::class,

@@ -12,21 +12,27 @@ direct remote MCP and independent REST clients respectively.
 
 | Operation | REST | MCP tool |
 | --- | --- | --- |
-| Upload and link | `POST /media` (multipart) | `upload-media` via local MCP bridge (all files; inline base64 is legacy for small files) |
-| Visible metadata | `GET /media?tree=…&xref=…` | `get-media` |
+| Upload and link | `POST /media` (multipart) | `upload-media` (bridge) or `create-media-upload` + signed `PUT /media/upload` |
+| Staged upload URL | `POST /media/upload` (signed, no OAuth) | `create-media-upload` |
+| Visible metadata | `GET /media?tree=…&xref=…` | `get-media` (returns signed `content-url`/`preview-url`) |
+| View a thumbnail | `GET /media/preview?token=…` (signed) | preview-url from `get-media` |
+| View/fetch original | `GET /media/content?token=…` (signed) | content-url from `get-media` |
 | Change metadata | `PUT /media` (JSON) | `update-media` |
 | Link approved media | `POST /media/links` (JSON) | `link-media` |
 | Unlink at record level | `DELETE /media/links` (query parameters) | `unlink-media` |
 | Request record deletion | `DELETE /media?tree=…&xref=…` | `delete-media` |
-| Download visible file | `GET /media/download?tree=…&xref=…&filename=…` | Use authenticated REST after `get-media` |
+| Download visible file | `GET /media/download?tree=…&xref=…&filename=…` | `download-media` (returns a signed `content-url`) |
+| Clean up unreferenced files | `POST /media/cleanup` (JSON, `api_import`) | — |
 
 Paths are relative to the module's API base URL shown in its control panel. The MCP URL is a separate endpoint, also shown there. Do not derive either URL from a filesystem path.
 
 All writes require `api_write` or `mcp_write`, an editor technical user, and automatic acceptance disabled. Reads require the respective `*_read_member` or `*_read_privacy` scope. Privacy-only reads check tree and record privacy and filter individual facts. Read scopes never authorize writes. Existing token issuance remains unchanged.
 
-Upload fields: `tree`, `target-xref`, `target-type` (`INDI`, `FAM`, `SOUR`), and optional `title`, `note`, `date`. The local MCP bridge takes `local-path` and transfers every file, including large files, in bounded MCP chunks with `mcp_write`. Direct MCP clients may use the legacy inline `filename`/`content-base64` mode up to 512 KiB decoded. Authenticated multipart `POST /api/media` remains a compatibility fallback only. Target XREFs have no `@` signs. A target with pending changes must be reviewed first.
+Upload fields: `tree`, `target-xref`, `target-type` (`INDI`, `FAM`, `SOUR`), and optional `title`, `note`, `date`. The local MCP bridge takes `local-path` and PUTs the raw bytes to a signed URL, so no base64 passes through the model or the MCP request. Direct MCP clients do the same: call `create-media-upload`, then PUT the bytes to the returned `upload-url` (single-use, short-lived). The legacy inline `filename`/`content-base64` mode (up to 512 KiB decoded) and authenticated multipart `POST /api/media` remain compatibility fallbacks. Target XREFs have no `@` signs. A target with pending changes must be reviewed first.
 
-JPEG, PNG, GIF and WebP are supported. Content must decode as an image and match its extension. PDF, SVG and TIFF are rejected in this version. Limits: 512 KiB decoded inline via MCP, 20 MiB through the local MCP bridge, 40 megapixels, available decoding memory, and the host's PHP upload/post limits. Base64 must be canonical with no whitespace or data-URL prefix. It is never accepted in a REST upload URL.
+JPEG, PNG, GIF, WebP and PDF are supported. Images are validated from their header and must match their extension; PDF is stored and linked as-is without decoding. SVG and TIFF are rejected. Limits: 512 KiB decoded inline via MCP, 20 MiB through the bridge or a signed staged upload, 40 megapixels, and the host's PHP upload/post limits. Base64 must be canonical with no whitespace or data-URL prefix. It is never accepted in a REST upload URL.
+
+Signed capability URLs: `get-media` returns a short-lived `preview-url` (a bounded JPEG thumbnail, generated on demand) and `content-url` for each visible file. The token is HMAC-signed, purpose-bound and expires after 5 minutes; it replaces the bearer token for that one file. `download-media` returns the same kind of `content-url` instead of base64. Previews are re-encoded, so they contain no EXIF; originals are stored unchanged (no EXIF stripping or malware scanning — an explicit administrator decision).
 
 Files use `api-media/<random-id>/<normalized-basename>` inside the tree media filesystem. `FILE` stores that relative path, not a server path or the tree media-directory prefix. Repeated basenames get separate paths; uploads are not idempotent. Titles use `OBJE:FILE:TITL`, notes use `OBJE:NOTE`, dates use the webtrees-supported custom `OBJE:_DATE` field. Date text is retained as provided; it is not normalized to a calendar date.
 
@@ -142,9 +148,10 @@ The first suite uses real SQLite transactions, PSR-7 and Flysystem with webtrees
 ## Aanvulling na live-acceptatietest (13 september 2026)
 
 - MCP pending media teruglezen vereist `mcp_read_member`, naast de webtrees-rechten van de technische gebruiker. `mcp_write` en REST-scope `api_read_member` geven geen MCP-member-leesrecht. Met alleen `mcp_read_privacy` kan een nieuwe XREF tot goedkeuring 404 geven: bewaar de XREF en upload niet opnieuw. Laat een beheerder zo nodig een passende token uitgeven.
-- 512 KiB is de maximale inline MCP-afbeelding. De lokale MCP-bridge verstuurt grotere bestanden in chunks tot 20 MiB via MCP. MCP accepteert daarnaast maximaal 8 MiB JSON, verder begrensd door PHP `post_max_size`; een te grote inline-upload geeft HTTP 413 met een gestructureerde handoff naar de bridge. Een proxy/webserver kan eerder afwijzen.
+- 512 KiB is de maximale inline MCP-afbeelding. De lokale MCP-bridge en `create-media-upload` versturen grotere bestanden tot 20 MiB als onbewerkte bytes naar een ondertekende URL, buiten de modelcontext. MCP accepteert daarnaast maximaal 8 MiB JSON, verder begrensd door PHP `post_max_size`; een te grote inline-upload geeft HTTP 413 met een gestructureerde handoff. Een proxy/webserver kan eerder afwijzen.
 - Als de webserver een body afkapt maar de oorspronkelijke `Content-Length` bewaart, herkent de module dit verschil en geeft hij eveneens 413 met `receivedBodyBytes`; een afgekapt JSON-body eindigt daarmee niet meer als een misleidende JSON-RPC parse error.
 - Als een gedeelde host ook de zichtbare lengte aanpast, herkent de module grote JSON-bodies zonder afsluitende `}` of `]` als afgekapt en geeft hij 413. Een opzettelijk ongeldige grote JSON-request kan daardoor dezelfde 413 krijgen; dat voorkomt een misleidende parsefout.
 - Voor inline MCP-upload is voldoende `post_max_size` nodig voor maximaal 512 KiB plus JSON-overhead. Voor 20 MiB REST-upload: `upload_max_filesize` minstens 20M en `post_max_size` groter dan 20M, bijvoorbeeld 24M wegens multipart-overhead. Dit zijn beheerinstructies; de code verandert geen serverconfiguratie.
-- Gebruik REST `POST /api/media`, `POST /api/media/links` en `GET /api/media/download`. Download met het volledige relatieve `filename` uit get-media, inclusief mappen, URL-gecodeerd; niet alleen de bestandsnaam.
+- Gebruik REST `POST /api/media`, `POST /api/media/links` en `GET /api/media/download`, of volg de ondertekende `content-url`/`preview-url` uit `get-media`. Download via REST met het volledige relatieve `filename` uit get-media, inclusief mappen, URL-gecodeerd; niet alleen de bestandsnaam.
+- `POST /api/media/cleanup` (scope `api_import`) toont of verwijdert niet-gerefereerde `api-media`-bestanden; standaard is het een dry-run. Gebruik `dry-run: false` om daadwerkelijk te verwijderen.
 - Pending wijzigingen blijven beschermd. Verkeerde testuploads en links moeten door een moderator worden afgewezen. Bestandsopruiming is een aparte beheeractie; afwijzen verwijdert niet automatisch het opgeslagen bestand.

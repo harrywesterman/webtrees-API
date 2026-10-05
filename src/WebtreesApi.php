@@ -101,8 +101,12 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UnlinkSpouse;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\McpTool;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MergeTrees;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Media;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaCleanup;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaContent;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaDownload;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaLinks;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaPreview;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaUpload;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\ModifyRecord;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\RevokeToken;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\RenumberXrefs;
@@ -216,6 +220,10 @@ class WebtreesApi extends AbstractModule implements
     public const string PATH_SEARCH_STRUCTURED      = 'search-structured';
     public const string PATH_ADD_FAMILY              = 'add-family';
     public const string PATH_UPLOAD_MEDIA_STATUS    = 'upload-media-status';
+    public const string PATH_MEDIA_CONTENT          = 'media/content';
+    public const string PATH_MEDIA_PREVIEW          = 'media/preview';
+    public const string PATH_MEDIA_UPLOAD           = 'media/upload';
+    public const string PATH_MEDIA_CLEANUP          = 'media/cleanup';
 
     //Prefences, Settings
 	public const string PREF_WEBTREES_API_TOKEN        = "webtrees_api_token";
@@ -290,9 +298,18 @@ class WebtreesApi extends AbstractModule implements
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_MEDIA, Media::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_MEDIA_DOWNLOAD, MediaDownload::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/media/links', MediaLinks::class, null, $api_middleware);
+        // Self-authorizing capability routes: the signed token replaces OAuth so a
+        // client can open a binary URL without putting bytes through the model.
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_MEDIA_CONTENT, MediaContent::class, null, []);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_MEDIA_PREVIEW, MediaPreview::class, null, []);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_MEDIA_UPLOAD, MediaUpload::class, null, []);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_MEDIA_CLEANUP, MediaCleanup::class, null, $api_middleware);
         if (version_compare(Webtrees::VERSION, '2.3.0', '<')) {
             Registry::routeFactory()->routeMap()->getRoute(Media::class)->allows(['GET', 'POST', 'PUT', 'DELETE']);
             Registry::routeFactory()->routeMap()->getRoute(MediaLinks::class)->allows(['POST', 'DELETE']);
+            Registry::routeFactory()->routeMap()->getRoute(MediaContent::class)->allows(['GET']);
+            Registry::routeFactory()->routeMap()->getRoute(MediaPreview::class)->allows(['GET']);
+            Registry::routeFactory()->routeMap()->getRoute(MediaUpload::class)->allows(['PUT', 'POST']);
         }
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_CONVERT_GEDCOM, ConvertGedcom::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_UNLINKED_RECORD, AddUnlinkedRecord::class, null, $api_middleware);

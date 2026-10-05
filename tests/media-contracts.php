@@ -75,6 +75,9 @@ foreach (['UploadMedia', 'GetMedia', 'UpdateMedia', 'LinkMedia', 'UnlinkMedia', 
     check(in_array($tool['name'], $short === 'GetMedia' ? McpToolPermission::$mcp_read_tools : McpToolPermission::$mcp_write_tools, true), 'Tool scope ' . $short);
 }
 check($seen === MediaTools::ACTIONS, 'All media tools discovered once');
+$staged = new ReflectionClass(Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\CreateMediaUpload::class);
+check($staged->implementsInterface(WebtreesMcpToolRequestHandlerInterface::class), 'Discoverable CreateMediaUpload');
+check(in_array('create-media-upload', McpToolPermission::$mcp_write_tools, true), 'Staged upload requires mcp_write');
 
 $protocolClass = new ReflectionClass(Jefferson49\Webtrees\Module\WebtreesApi\Http\Middleware\McpProtocol::class);
 $protocol = $protocolClass->newInstanceWithoutConstructor();
@@ -82,6 +85,7 @@ $tools = $protocolClass->getMethod('getTools')->invoke($protocol, WebtreesMcpToo
 foreach (MediaTools::ACTIONS as $action) {
     check(count(array_filter($tools, fn ($tool) => $tool['name'] === $action)) === 1, 'Actual tools/list discovers ' . $action);
 }
+check(count(array_filter($tools, fn ($tool) => $tool['name'] === 'create-media-upload')) === 1, 'Actual tools/list discovers create-media-upload');
 $factory = new Nyholm\Psr7\Factory\Psr17Factory();
 Registry::responseFactory(new Fisharebest\Webtrees\Factories\ResponseFactory($factory, $factory));
 $protocolClass->getProperty('stream_factory')->setValue(null, $factory);
@@ -181,6 +185,12 @@ foreach ([Media::class => ['GET', 'POST', 'PUT', 'DELETE'], MediaLinks::class =>
     preg_match('/getRoute\\(' . $short . '::class\\)->allows\\(([^;]+)\\);/', $source, $match);
     preg_match_all("/'([A-Z]+)'/", $match[1] ?? '', $allowed);
     check($allowed[1] === $methods, 'Production route methods ' . $short);
+}
+foreach (['PATH_MEDIA_CONTENT', 'PATH_MEDIA_PREVIEW', 'PATH_MEDIA_UPLOAD', 'PATH_MEDIA_CLEANUP'] as $constant) {
+    check(str_contains($source, $constant), 'Route constant ' . $constant);
+}
+foreach (['MediaContent::class', 'MediaPreview::class', 'MediaUpload::class', 'MediaCleanup::class'] as $controller) {
+    check(str_contains($source, $controller), 'Capability route registered ' . $controller);
 }
 $processMcp = new Jefferson49\Webtrees\Module\WebtreesApi\Http\Middleware\ProcessMcp();
 $limit = $processMcp::bodyLimit();

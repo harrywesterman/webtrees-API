@@ -116,7 +116,7 @@
             "get": {
                 "operationId": "get-media",
                 "summary": "get-media",
-                "description": "Read visible media filenames, webtrees page URL and pending status. For bytes use authenticated REST GET /api/media/download with tree, xref and filename; the webtrees page URL is not a public file URL. Reading pending records requires mcp_read_member and sufficient webtrees user rights; mcp_write or api_read_member does not grant MCP member reads. A privacy-only read may return 404 until approval; retain the upload XREF and do not re-upload. For download, filename is the complete relative storage path returned by get-media, including api-media/.../name.png, URL-encoded as a query parameter, not just the basename.",
+                "description": "Read visible media filenames, metadata, webtrees page URL and pending status. Each file includes a short-lived signed preview-url (thumbnail) and content-url (original bytes) so you can view or fetch it without downloading base64; the webtrees page URL is not a public file URL. Authenticated REST GET /api/media/download remains available. Reading pending records requires mcp_read_member and sufficient webtrees user rights; mcp_write or api_read_member does not grant MCP member reads. A privacy-only read may return 404 until approval; retain the upload XREF and do not re-upload. For download, filename is the complete relative storage path returned by get-media, including api-media/.../name.png, URL-encoded as a query parameter, not just the basename.",
                 "tags": [
                     "webtrees"
                 ],
@@ -1722,14 +1722,22 @@
                         "in": "query",
                         "description": "Required for format=gedcom.",
                         "required": false,
-                        "schema": {"type": "boolean", "default": false}
+                        "schema": {
+                            "type": "boolean",
+                            "default": false
+                        }
                     },
                     {
                         "name": "confirm-full-gedcom",
                         "in": "query",
                         "description": "Required confirmation for format=gedcom.",
                         "required": false,
-                        "schema": {"type": "string", "enum": ["I_UNDERSTAND_FULL_GEDCOM"]}
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "I_UNDERSTAND_FULL_GEDCOM"
+                            ]
+                        }
                     }
                 ],
                 "responses": {
@@ -2092,102 +2100,266 @@
         },
         "/unlink-child": {
             "delete": {
-                "tags": ["webtrees"],
+                "tags": [
+                    "webtrees"
+                ],
                 "description": "Remove an individual from a family as a child, preserving both records.",
                 "operationId": "unlink-child",
                 "parameters": [
-                    {"$ref": "#/components/parameters/tree"},
-                    {"name": "individual-xref", "in": "query", "description": "The XREF of the child individual to unlink.", "required": true, "schema": {"$ref": "#/components/schemas/Xref"}},
-                    {"name": "family-xref", "in": "query", "description": "The XREF of the family from which the child shall be unlinked.", "required": true, "schema": {"$ref": "#/components/schemas/Xref"}}
+                    {
+                        "$ref": "#/components/parameters/tree"
+                    },
+                    {
+                        "name": "individual-xref",
+                        "in": "query",
+                        "description": "The XREF of the child individual to unlink.",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/components/schemas/Xref"
+                        }
+                    },
+                    {
+                        "name": "family-xref",
+                        "in": "query",
+                        "description": "The XREF of the family from which the child shall be unlinked.",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/components/schemas/Xref"
+                        }
+                    }
                 ],
                 "responses": {
-                    "200": {"description": "Successfully unlinked child.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/XrefItem"}}}},
-                    "400": {"$ref": "#/components/responses/400"},
-                    "401": {"$ref": "#/components/responses/401"},
-                    "403": {"$ref": "#/components/responses/403"},
-                    "404": {"$ref": "#/components/responses/404"},
-                    "406": {"$ref": "#/components/responses/406"},
-                    "429": {"$ref": "#/components/responses/429"},
-                    "500": {"$ref": "#/components/responses/500"}
+                    "200": {
+                        "description": "Successfully unlinked child.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/XrefItem"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "$ref": "#/components/responses/400"
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/401"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/403"
+                    },
+                    "404": {
+                        "$ref": "#/components/responses/404"
+                    },
+                    "406": {
+                        "$ref": "#/components/responses/406"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/429"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/500"
+                    }
                 }
             }
         },
         "/unlink-spouse": {
             "delete": {
-                "tags": ["webtrees"],
+                "tags": [
+                    "webtrees"
+                ],
                 "description": "Remove an individual from a family as a spouse, preserving both records.",
                 "operationId": "unlink-spouse",
                 "parameters": [
-                    {"$ref": "#/components/parameters/tree"},
-                    {"name": "individual-xref", "in": "query", "description": "The XREF of the spouse individual to unlink.", "required": true, "schema": {"$ref": "#/components/schemas/Xref"}},
-                    {"name": "family-xref", "in": "query", "description": "The XREF of the family from which the spouse shall be unlinked.", "required": true, "schema": {"$ref": "#/components/schemas/Xref"}}
+                    {
+                        "$ref": "#/components/parameters/tree"
+                    },
+                    {
+                        "name": "individual-xref",
+                        "in": "query",
+                        "description": "The XREF of the spouse individual to unlink.",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/components/schemas/Xref"
+                        }
+                    },
+                    {
+                        "name": "family-xref",
+                        "in": "query",
+                        "description": "The XREF of the family from which the spouse shall be unlinked.",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/components/schemas/Xref"
+                        }
+                    }
                 ],
                 "responses": {
-                    "200": {"description": "Successfully unlinked spouse.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/XrefItem"}}}},
-                    "400": {"$ref": "#/components/responses/400"},
-                    "401": {"$ref": "#/components/responses/401"},
-                    "403": {"$ref": "#/components/responses/403"},
-                    "404": {"$ref": "#/components/responses/404"},
-                    "406": {"$ref": "#/components/responses/406"},
-                    "429": {"$ref": "#/components/responses/429"},
-                    "500": {"$ref": "#/components/responses/500"}
+                    "200": {
+                        "description": "Successfully unlinked spouse.",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/XrefItem"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "$ref": "#/components/responses/400"
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/401"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/403"
+                    },
+                    "404": {
+                        "$ref": "#/components/responses/404"
+                    },
+                    "406": {
+                        "$ref": "#/components/responses/406"
+                    },
+                    "429": {
+                        "$ref": "#/components/responses/429"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/500"
+                    }
                 }
             }
         },
         "/list-pending-changes": {
             "get": {
-                "tags": ["webtrees"],
+                "tags": [
+                    "webtrees"
+                ],
                 "description": "List pending approval-queue changes for a tree, optionally limited to one record.",
                 "operationId": "list-pending-changes",
                 "parameters": [
-                    {"$ref": "#/components/parameters/tree"},
-                    {"name": "xref", "in": "query", "description": "Optional record XREF filter.", "required": false, "schema": {"$ref": "#/components/schemas/Xref"}}
+                    {
+                        "$ref": "#/components/parameters/tree"
+                    },
+                    {
+                        "name": "xref",
+                        "in": "query",
+                        "description": "Optional record XREF filter.",
+                        "required": false,
+                        "schema": {
+                            "$ref": "#/components/schemas/Xref"
+                        }
+                    }
                 ],
                 "responses": {
-                    "200": {"description": "Pending changes for the tree."},
-                    "400": {"$ref": "#/components/responses/400"},
-                    "401": {"$ref": "#/components/responses/401"},
-                    "403": {"$ref": "#/components/responses/403"},
-                    "500": {"$ref": "#/components/responses/500"}
+                    "200": {
+                        "description": "Pending changes for the tree."
+                    },
+                    "400": {
+                        "$ref": "#/components/responses/400"
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/401"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/403"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/500"
+                    }
                 }
             }
         },
         "/get-pending-record": {
             "get": {
-                "tags": ["webtrees"],
+                "tags": [
+                    "webtrees"
+                ],
                 "description": "Get the pending GEDCOM changes for one record.",
                 "operationId": "get-pending-record",
                 "parameters": [
-                    {"$ref": "#/components/parameters/tree"},
-                    {"name": "xref", "in": "query", "description": "The record XREF.", "required": true, "schema": {"$ref": "#/components/schemas/Xref"}}
+                    {
+                        "$ref": "#/components/parameters/tree"
+                    },
+                    {
+                        "name": "xref",
+                        "in": "query",
+                        "description": "The record XREF.",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/components/schemas/Xref"
+                        }
+                    }
                 ],
                 "responses": {
-                    "200": {"description": "Pending record changes."},
-                    "400": {"$ref": "#/components/responses/400"},
-                    "401": {"$ref": "#/components/responses/401"},
-                    "403": {"$ref": "#/components/responses/403"},
-                    "404": {"$ref": "#/components/responses/404"},
-                    "500": {"$ref": "#/components/responses/500"}
+                    "200": {
+                        "description": "Pending record changes."
+                    },
+                    "400": {
+                        "$ref": "#/components/responses/400"
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/401"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/403"
+                    },
+                    "404": {
+                        "$ref": "#/components/responses/404"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/500"
+                    }
                 }
             }
         },
         "/cancel-pending": {
             "delete": {
-                "tags": ["webtrees"],
+                "tags": [
+                    "webtrees"
+                ],
                 "description": "Cancel pending changes for a record before moderator approval.",
                 "operationId": "cancel-pending",
                 "parameters": [
-                    {"$ref": "#/components/parameters/tree"},
-                    {"name": "xref", "in": "query", "description": "The record XREF.", "required": true, "schema": {"$ref": "#/components/schemas/Xref"}},
-                    {"name": "change-id", "in": "query", "description": "Optional change ID; cancels this and later pending changes for the record.", "required": false, "schema": {"type": "string"}}
+                    {
+                        "$ref": "#/components/parameters/tree"
+                    },
+                    {
+                        "name": "xref",
+                        "in": "query",
+                        "description": "The record XREF.",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/components/schemas/Xref"
+                        }
+                    },
+                    {
+                        "name": "change-id",
+                        "in": "query",
+                        "description": "Optional change ID; cancels this and later pending changes for the record.",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
                 ],
                 "responses": {
-                    "200": {"description": "Pending changes cancelled."},
-                    "400": {"$ref": "#/components/responses/400"},
-                    "401": {"$ref": "#/components/responses/401"},
-                    "403": {"$ref": "#/components/responses/403"},
-                    "404": {"$ref": "#/components/responses/404"},
-                    "500": {"$ref": "#/components/responses/500"}
+                    "200": {
+                        "description": "Pending changes cancelled."
+                    },
+                    "400": {
+                        "$ref": "#/components/responses/400"
+                    },
+                    "401": {
+                        "$ref": "#/components/responses/401"
+                    },
+                    "403": {
+                        "$ref": "#/components/responses/403"
+                    },
+                    "404": {
+                        "$ref": "#/components/responses/404"
+                    },
+                    "500": {
+                        "$ref": "#/components/responses/500"
+                    }
                 }
             }
         },
@@ -2606,6 +2778,130 @@
                     "500": {
                         "$ref": "#/components/responses/500",
                         "description": "Internal server error"
+                    }
+                }
+            }
+        },
+        "/media/content": {
+            "get": {
+                "tags": [
+                    "webtrees"
+                ],
+                "description": "Stream a visible media file authorized by a short-lived signed token from get-media. No bearer token is required.",
+                "operationId": "939ba3e90e6d4baa9000a6a73578380d",
+                "parameters": [
+                    {
+                        "name": "token",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "File bytes"
+                    },
+                    "403": {
+                        "description": "Invalid or expired token"
+                    },
+                    "404": {
+                        "description": "File not found"
+                    }
+                }
+            }
+        },
+        "/media/preview": {
+            "get": {
+                "tags": [
+                    "webtrees"
+                ],
+                "description": "Stream a bounded JPEG thumbnail of a visible media file authorized by a signed token from get-media.",
+                "operationId": "2dbe67a93e2602df50b38bc150f10802",
+                "parameters": [
+                    {
+                        "name": "token",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "JPEG thumbnail"
+                    },
+                    "403": {
+                        "description": "Invalid or expired token"
+                    },
+                    "415": {
+                        "description": "No preview available for this file"
+                    }
+                }
+            }
+        },
+        "/media/upload": {
+            "put": {
+                "tags": [
+                    "webtrees"
+                ],
+                "description": "Receive raw image or PDF bytes for a single-use signed staged upload created by create-media-upload. No bearer token is required.",
+                "operationId": "99425a919bad93e65ddd9c71fa19f4ce",
+                "parameters": [
+                    {
+                        "name": "token",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/octet-stream": {
+                            "schema": {
+                                "type": "string",
+                                "format": "binary"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Upload stored; pending approval"
+                    },
+                    "403": {
+                        "description": "Invalid or expired token"
+                    },
+                    "409": {
+                        "description": "Upload URL already used"
+                    },
+                    "413": {
+                        "description": "Upload too large"
+                    }
+                }
+            }
+        },
+        "/media/cleanup": {
+            "post": {
+                "tags": [
+                    "webtrees"
+                ],
+                "description": "List or delete api-media files that no approved media record references. Requires the api_import scope.",
+                "operationId": "0b1e1456679980efb8ad331f8e140286",
+                "responses": {
+                    "200": {
+                        "description": "Cleanup report"
+                    },
+                    "403": {
+                        "description": "Scope or access denied"
+                    },
+                    "404": {
+                        "description": "Tree not found"
                     }
                 }
             }

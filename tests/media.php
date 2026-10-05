@@ -11,11 +11,14 @@ namespace Fisharebest\Webtrees {
     class DB extends \Illuminate\Database\Capsule\Manager {}
     class Registry {
         public static array $records = [];
+        public static $container;
+        public static function container($container = null) { if ($container !== null) { self::$container = $container; } return self::$container; }
         public static function gedcomRecordFactory() { return new class { public function make($id, $tree) { return Registry::$records[$id] ?? null; } }; }
     }
     class Tree {
         public function __construct(public $fs) {}
         public function id() { return 1; }
+        public function name() { return 'test'; }
         public function mediaFilesystem() { return $this->fs; }
         public function createRecord($gedcom) {
             $id = 'M' . (count(Registry::$records) + 10);
@@ -123,6 +126,7 @@ namespace {
     DB::schema()->create('gedcom', function ($t) { $t->integer('gedcom_id'); });
     DB::table('gedcom')->insert(['gedcom_id' => 1]);
     DB::schema()->create('change', function ($t) { $t->integer('gedcom_id'); $t->string('xref'); $t->string('status'); $t->text('new_gedcom'); });
+    DB::schema()->create('media_file', function ($t) { $t->integer('m_file'); $t->string('multimedia_file_refn'); });
     $dir = sys_get_temp_dir() . '/media-behavior-' . bin2hex(random_bytes(6));
     mkdir($dir, 0700);
     $fs = new \League\Flysystem\Filesystem(new \League\Flysystem\Local\LocalFilesystemAdapter($dir));
@@ -145,6 +149,10 @@ namespace {
     rejects(fn () => MediaInput::image($png, 'photo.jpg', 10000), 415);
     rejects(fn () => MediaInput::image('%PDF-1.4', 'scan.pdf', 10000), 415);
     rejects(fn () => MediaInput::image($png, 'photo.png', 1), 413);
+    check(MediaInput::file('%PDF-1.7 akte', 'scan.pdf', 10000) === 'application/pdf', 'PDF document accepted');
+    rejects(fn () => MediaInput::file($png, 'scan.pdf', 10000), 415);
+    rejects(fn () => MediaInput::file('%PDF-1.7', 'scan.png', 10000), 415);
+    check(MediaInput::isDocument('application/pdf') && !MediaInput::isDocument('image/png'), 'Document classification');
     foreach (['../photo.png', '/photo.png', 'C:\\photo.png', '.hidden.png', "a\0.png"] as $name) { rejects(fn () => MediaInput::filename($name), 400); }
     foreach (['../secret', '/secret', 'https://example.test/a', 'a/./b', 'a//b'] as $path) { rejects(fn () => MediaInput::path($path), 400); }
     check(MediaInput::base64(base64_encode($png)) === $png, 'base64');
@@ -166,6 +174,20 @@ namespace {
         check(str_contains($data, " OBJE\n1 FILE api-media/") && str_contains($data, "\n2 TITL Photo"), 'GEDCOM');
     }
     check(count(array_unique($paths)) === 3, 'Duplicate basenames do not overwrite');
+    approved(); Registry::$records = ['I1' => new GedcomRecord('I1', '0 @I1@ INDI', $tree)];
+    $pdf = "%PDF-1.7\n" . str_repeat('akte', 50);
+    $pdfResponse = $handler->handle(request('POST', ['tree' => 'test', 'target-xref' => 'I1', 'target-type' => 'INDI', 'title' => 'Akte'])
+        ->withUploadedFiles(['file' => new UploadedFile(\Nyholm\Psr7\Stream::create($pdf), strlen($pdf), UPLOAD_ERR_OK, 'akte.pdf', 'application/pdf')]));
+    check($pdfResponse->getStatusCode() === 201, 'PDF multipart upload: ' . (string) $pdfResponse->getBody());
+    $pdfResult = json_decode((string) $pdfResponse->getBody(), true);
+    check($pdfResult['mime-type'] === 'application/pdf' && $fs->read($pdfResult['filename']) === $pdf, 'PDF stored and linked without decoding');
+    approved();
+    $origResponse = $handler->handle(request('POST', ['tree' => 'test', 'target-xref' => 'I1', 'target-type' => 'INDI'])
+        ->withUploadedFiles(['file' => new UploadedFile(\Nyholm\Psr7\Stream::create($png), strlen($png), UPLOAD_ERR_OK, 'mijn foto (1).png', 'image/png')]));
+    $origResult = json_decode((string) $origResponse->getBody(), true);
+    $origGedcom = DB::table('change')->where('xref', $origResult['xref'])->value('new_gedcom');
+    check(str_contains($origGedcom, "\n2 _ORIG mijn foto (1).png"), 'Original filename preserved in _ORIG');
+    check(str_contains($origResult['filename'], 'mijn_foto__1_.png'), 'Storage basename sanitized');
     approved(); Registry::$records = ['I1' => new GedcomRecord('I1', '0 @I1@ INDI', $tree)];
     $input = ['tree' => 'test', 'target-xref' => 'I1', 'target-type' => 'INDI', 'filename' => 'photo.png', 'content-base64' => base64_encode($png)];
     $mcp = (new ServerRequest('GET', ''))->withAttribute('oauth_scopes', ['mcp_write'])->withAttribute('media_mcp', true)->withQueryParams($input);
@@ -246,6 +268,65 @@ namespace {
         check($tool['name'] === $action && strlen($tool['description']) > 100, 'Tool description');
     }
     check(isset(MediaTools::openApiPaths()['/media']['post']['requestBody']['content']['multipart/form-data']), 'Swagger multipart');
+    // Phase 1: signed capability URLs let a client view/download without base64.
+    Registry::container(new class {
+        public function get(string $class): object { return new class { public function getPreference(string $name, $default = '') { return 'test-encryption-key'; } }; }
+    });
+    $capabilityRequest = request('GET', ['tree' => 'test', 'xref' => 'M1'], 'api_read_member')->withAttribute('base_url', 'https://example.test');
+    $listing = json_decode((string) $handler->handle($capabilityRequest)->getBody(), true);
+    $photo = null;
+    foreach ($listing['files'] as $entry) { if ($entry['filename'] === 'photo.png') { $photo = $entry; } }
+    check($photo !== null && isset($photo['content-url'], $photo['preview-url'], $photo['expires-at']), 'get-media returns signed URLs');
+    check($photo['mime-type'] === 'image/png' && $photo['bytes'] === strlen($png), 'get-media file metadata');
+    check(!isset($photo['content-base64']), 'get-media never returns base64');
+    $tokenOf = function (string $url): string { parse_str(parse_url($url, PHP_URL_QUERY) ?? '', $query); return $query['token'] ?? ''; };
+    $content = new \Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaContent(new \Fisharebest\Webtrees\Services\TreeService($tree));
+    $contentResponse = $content->handle((new ServerRequest('GET', ''))->withQueryParams(['token' => $tokenOf($photo['content-url'])]));
+    check($contentResponse->getStatusCode() === 200 && (string) $contentResponse->getBody() === $png, 'Signed content URL streams the original bytes');
+    check($contentResponse->getHeaderLine('Content-Type') === 'image/png', 'Signed content URL sets the image type');
+    check($content->handle((new ServerRequest('GET', ''))->withQueryParams(['token' => 'tampered']))->getStatusCode() === 403, 'Invalid content token rejected');
+    $preview = new \Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaPreview(new \Fisharebest\Webtrees\Services\TreeService($tree));
+    $previewResponse = $preview->handle((new ServerRequest('GET', ''))->withQueryParams(['token' => $tokenOf($photo['preview-url'])]));
+    check($previewResponse->getStatusCode() === 200 && $previewResponse->getHeaderLine('Content-Type') === 'image/jpeg', 'Signed preview URL returns a JPEG thumbnail');
+    check($preview->handle((new ServerRequest('GET', ''))->withQueryParams(['token' => $tokenOf($photo['content-url'])]))->getStatusCode() === 403, 'Content and preview tokens are purpose-bound');
+    // Phase 2: signed staged raw upload keeps base64 out of the MCP request.
+    approved(); Registry::$records['I1'] = new GedcomRecord('I1', '0 @I1@ INDI', $tree);
+    $spool = sys_get_temp_dir() . '/media-upload-test-' . bin2hex(random_bytes(6));
+    $uploadToken = \Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaToken::sign([
+        'op' => 'upload', 'tree' => 'test', 'xref' => 'I1', 'type' => 'INDI', 'file' => 'staged.png',
+        'title' => 'Staged', 'note' => '', 'date' => '', 'id' => bin2hex(random_bytes(16)),
+    ], \Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaToken::moduleKey(), 600);
+    $upload = new \Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaUpload($handler, new \Fisharebest\Webtrees\Services\TreeService($tree), $spool);
+    $put = (new ServerRequest('PUT', ''))->withQueryParams(['token' => $uploadToken])
+        ->withHeader('Content-Type', 'image/png')->withBody(\Nyholm\Psr7\Stream::create($png));
+    $uploaded = $upload->handle($put);
+    check($uploaded->getStatusCode() === 201, 'Staged upload accepted: ' . (string) $uploaded->getBody());
+    $uploadedResult = json_decode((string) $uploaded->getBody(), true);
+    check($fs->read($uploadedResult['filename']) === $png, 'Staged upload stores the raw bytes');
+    $replay = $upload->handle((new ServerRequest('PUT', ''))->withQueryParams(['token' => $uploadToken])
+        ->withHeader('Content-Type', 'image/png')->withBody(\Nyholm\Psr7\Stream::create($png)));
+    check($replay->getStatusCode() === 409, 'Signed upload URL is single-use');
+    $wrongPurpose = (new ServerRequest('PUT', ''))->withQueryParams(['token' => $tokenOf($photo['content-url'])])->withBody(\Nyholm\Psr7\Stream::create($png));
+    check($upload->handle($wrongPurpose)->getStatusCode() === 403, 'Content token cannot authorize an upload');
+    $oversized = (new ServerRequest('PUT', ''))->withQueryParams(['token' => $uploadToken])->withHeader('Content-Length', (string) (MediaInput::REST_LIMIT + 1))->withBody(\Nyholm\Psr7\Stream::create($png));
+    check($upload->handle($oversized)->getStatusCode() === 413, 'Staged upload rejects oversized bodies');
+    foreach (glob($spool . '/*') ?: [] as $file) { unlink($file); }
+    if (is_dir($spool)) { rmdir($spool); }
+    // Phase 4: admin cleanup removes only unreferenced, old api-media files.
+    $fs->write('api-media/keep/photo.png', $png);
+    DB::table('media_file')->insert(['m_file' => 1, 'multimedia_file_refn' => 'api-media/keep/photo.png']);
+    $fs->write('api-media/orphan/old.png', $png);
+    touch($dir . '/api-media/orphan/old.png', time() - 40 * 86400);
+    $cleanup = new \Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaCleanup(new \Fisharebest\Webtrees\Services\TreeService($tree));
+    $cleanupRequest = (new ServerRequest('POST', ''))->withAttribute('oauth_scopes', ['api_import'])->withQueryParams(['tree' => 'test']);
+    $dry = json_decode((string) $cleanup->handle($cleanupRequest)->getBody(), true);
+    check($dry['dry-run'] === true && $dry['removed'] === ['api-media/orphan/old.png'], 'Cleanup dry run lists only the orphan');
+    check($fs->fileExists('api-media/orphan/old.png'), 'Dry run keeps the file');
+    $real = json_decode((string) $cleanup->handle($cleanupRequest->withQueryParams(['tree' => 'test', 'dry-run' => 'false']))->getBody(), true);
+    check($real['dry-run'] === false && !$fs->fileExists('api-media/orphan/old.png') && $fs->fileExists('api-media/keep/photo.png'), 'Cleanup removes the orphan and keeps the referenced file');
+    check($cleanup->handle($cleanupRequest->withAttribute('oauth_scopes', ['api_read_member']))->getStatusCode() === 403, 'Cleanup requires api_import');
+    DB::table('media_file')->delete();
+    Registry::container(null);
     require __DIR__ . '/media-chunk-handler.php';
     foreach ($fs->listContents('', true)->filter(fn ($i) => $i->isFile()) as $item) { $fs->delete($item->path()); }
     $fs->deleteDirectory('api-media'); rmdir($dir);
