@@ -67,7 +67,7 @@ class AddChildToFamily implements WebtreesMcpToolRequestHandlerInterface
 {
     private TreeService $tree_service;
 
-    public const string METHOD_DESCRIPTION = 'Add a new child to a family.';
+    public const string METHOD_DESCRIPTION = 'Create a NEW individual and add it as a child to an existing family. To attach an existing individual, use link-child-to-family instead.';
     public const string XREF_DESCRIPTION   = 'The XREF (i.e. GEDOM cross-reference identifier) of the family, to which the child shall be added.';
 
     public function __construct(TreeService $tree_service)
@@ -206,6 +206,21 @@ class AddChildToFamily implements WebtreesMcpToolRequestHandlerInterface
             return $gedcom_validation_response;
         }
 
+        // This tool always creates a new individual. A level-one CHIL link in the
+        // submitted GEDCOM asks to link an existing individual, which would create
+        // a phantom child (child of the family and parent of a sibling). Refuse it
+        // and point the caller at the linking tool instead.
+        if (preg_match_all('/^1 CHIL @([^@\r\n]+)@/m', $gedcom, $child_matches) > 0) {
+            $child_xref = $child_matches[1][0];
+
+            return api_response(
+                'add-child-to-family always creates a new individual and cannot link an existing one. '
+                . 'The GEDCOM contains "1 CHIL @' . $child_xref . '@". '
+                . 'Use link-child-to-family(individual-xref=@' . $child_xref . '@, family-xref=@' . $xref . '@) to attach an existing individual.',
+                StatusCodeInterface::STATUS_BAD_REQUEST
+            );
+        }
+
         //Check user write access
         $user_rights_validation_response = CheckAccess::checkUserWriteAccess($tree);
         if ($user_rights_validation_response->getStatusCode() !== StatusCodeInterface::STATUS_OK) {
@@ -248,7 +263,7 @@ class AddChildToFamily implements WebtreesMcpToolRequestHandlerInterface
                     ),
                     'gedcom' => McpSchema::withDescription(
                         McpSchema::GEDCOM,
-                        'The GEDCOM text, which shall be added to the newly created record.',
+                        'The GEDCOM text for the newly created individual. Do not include a CHIL link; use link-child-to-family to attach an existing individual.',
                         McpSchema::PREPEND
                     ),
                 ],

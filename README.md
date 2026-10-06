@@ -67,7 +67,7 @@ This README file contains the following main sections:
 ## Implemented APIs
 |<div style="width:250px">API</div> |Description|
 |:----------|:----------|
-|POST/add-child-to-family|Add a new INDI record for a child to a family.|
+|POST/add-child-to-family|Create a **new** INDI record for a child and add it to a family. It cannot link an existing individual (a `CHIL` line is rejected); use `link-child-to-family` for that.|
 |POST/add-child-to-individual|Add a new INDI record for a child to a parent.|
 |POST/add-parent-to-individual|Add a new INDI record for a parent to an indivudal.|
 |POST/add-spouse-to-family|Add a new INDI record for a spouse to a family.|
@@ -76,10 +76,10 @@ This README file contains the following main sections:
 |MCP/create-source|Create a first-class `SOUR` record with title, author, publication and note fields.|
 |MCP/modify-source|Update source fields without replacing unrelated source GEDCOM data.|
 |MCP/get-sources|List first-class source records in a tree.|
-|MCP/add-source-citation|Link a source to an INDI/FAM record or a specific event; duplicate links are no-ops.|
+|MCP/add-source-citation|Link one or more sources to an INDI/FAM record or specific events. Pass `citations: [{source-xref, event, page, note}, …]` to apply several in a single pending change, or `dry-run=true` to preview; duplicate links are no-ops.|
 |MCP/get-citations|Read source citations, including event, page and note details.|
 |Errors|Error responses use `error.code` values such as `token_invalid`, `scope_missing`, `pending_conflict`, `protected_links_would_be_removed`, and `inline_upload_too_large`; the local MCP bridge preserves these codes.|
-|MCP/verify-write|Verify a write as `pending`, `applied`, `pending_delete`, or `deleted` using the returned SHA-256 record hash.|
+|MCP/verify-write|Verify a write as `pending`, `applied`, `pending_delete`, or `deleted` using the SHA-256 record hash returned by the write (pass it as `hash` or `version`; both are aliases). Omit it to just read the current state.|
 |MCP/search-structured|Search by name, place, year range, occupation, or full text in NOTE/source fields with stable offset/limit pagination and tree/XREF sorting.|
 |MCP/add-family|Create spouses, children, FAMS/FAMC/CHIL links and family notes in one transactional pending operation; repeat the idempotency key safely.|
 |MCP/upload-media-status|Inspect an owned resumable upload after a transport failure; reports receiving, committing/uncertain, or done without re-uploading.|
@@ -95,9 +95,9 @@ This README file contains the following main sections:
 |POST/link-spouse-to-individual|Link an existing INDI record as a spouse to an individual.|
 |DELETE/unlink-child|Remove an existing child-to-family relationship while preserving both records.|
 |DELETE/unlink-spouse|Remove an existing spouse-to-family relationship while preserving both records.|
-|GET/list-pending-changes|List pending approval-queue changes for a tree, optionally filtered by record.|
+|GET/list-pending-changes|List pending approval-queue changes for a tree, optionally filtered by record. Supports `limit`/`offset` pagination (default 100, max 500) and `summary=true` to omit the GEDCOM payloads; the response includes `total`.|
 |GET/get-pending-record|Read the pending GEDCOM changes for a record.|
-|DELETE/cancel-pending|Cancel pending changes for a record before moderator approval.|
+|DELETE/cancel-pending|Cancel pending changes for a record before moderator approval. Cancelling a creation leaves an expected gap in the xref sequence; the xref is neither reused nor tombstoned, so tooling must not infer missing records from gaps.|
 |MCP/download-media|Get a short-lived signed URL for a visible media file; no base64 enters the model. The local MCP bridge writes the fetched bytes to a local temporary file.|
 |MCP/create-media-upload|Create a single-use signed URL for a raw image/PDF upload, so no base64 enters the model.|
 |MCP/upload-media-batch|Upload multiple local images and submit one combined pending change for one target.|

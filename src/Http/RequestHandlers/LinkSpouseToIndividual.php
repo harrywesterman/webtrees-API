@@ -241,11 +241,16 @@ class LinkSpouseToIndividual implements WebtreesMcpToolRequestHandlerInterface
         }
 
 
+        // Always emit HUSB before WIFE for a stable, predictable line order.
         if ($individual->sex() === 'M') {
-            $gedcom = "0 @@ FAM\n1 HUSB @" . $individual->xref() . "@\n1 WIFE @" . $spouse->xref() . '@';
+            $husband = $individual;
+            $wife = $spouse;
         } else {
-            $gedcom = "0 @@ FAM\n1 WIFE @" . $individual->xref() . "@\n1 HUSB @" . $spouse->xref() . '@';
+            $husband = $spouse;
+            $wife = $individual;
         }
+
+        $gedcom = "0 @@ FAM\n1 HUSB @" . $husband->xref() . "@\n1 WIFE @" . $wife->xref() . '@';
 
         $family = $tree->createFamily($gedcom);
 

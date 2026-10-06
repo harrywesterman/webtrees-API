@@ -23,7 +23,7 @@ use function Jefferson49\Webtrees\Module\WebtreesApi\Helpers\api_response;
 
 final class CancelPending implements WebtreesMcpToolRequestHandlerInterface
 {
-    public const string METHOD_DESCRIPTION = 'Cancel pending changes for a record before moderator approval.';
+    public const string METHOD_DESCRIPTION = 'Cancel pending changes for a record before moderator approval. Cancelling a creation does not reuse or tombstone its xref, so gaps in the xref sequence are expected and should not be treated as missing records.';
 
     public function __construct(private TreeService $tree_service, private PendingChangesService $pending_changes_service) {}
 

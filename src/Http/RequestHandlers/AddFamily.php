@@ -69,10 +69,10 @@ final class AddFamily implements WebtreesMcpToolRequestHandlerInterface
     {
         if (is_string($value) && $value !== '') {
             $record = \Fisharebest\Webtrees\Registry::gedcomRecordFactory()->make($value, $tree);
-            if (!$record instanceof Individual) throw new \DomainException($role . ' must identify an INDI record.', 400);
+            if (!$record instanceof Individual) throw new \DomainException($role . ' must be an existing INDI xref such as @X123@; a bare name is not accepted. Pass an object with a name/gedcom field to create a new person.', 400);
             return ['xref' => $record->xref(), 'record' => $record];
         }
-        if (!is_array($value)) throw new \DomainException($role . ' must be an XREF or participant object.', 400);
+        if (!is_array($value)) throw new \DomainException($role . ' must be an existing INDI xref such as @X123@, or a participant object with a name/gedcom field.', 400);
         $gedcom = trim((string) ($value['gedcom'] ?? ''));
         if ($gedcom === '') $gedcom = '1 NAME ' . trim((string) ($value['name'] ?? ''));
         if (!str_contains($gedcom, '1 NAME ') && ($value['name'] ?? '') !== '') $gedcom = "1 NAME {$value['name']}\n" . $gedcom;

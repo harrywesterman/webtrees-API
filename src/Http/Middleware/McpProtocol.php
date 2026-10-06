@@ -39,6 +39,7 @@ use Fisharebest\Webtrees\Validator;
 use Jefferson49\Webtrees\Helpers\Functions;
 use Jefferson49\Webtrees\Log\CustomModuleLog;
 use Jefferson49\Webtrees\Log\CustomModuleLogInterface;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\StructuredContent;
 use Jefferson49\Webtrees\Module\WebtreesApi\WebtreesApi;
 use Jefferson49\Webtrees\Module\WebtreesApi\Mcp\Errors;
 use Psr\Http\Message\ResponseFactoryInterface;
@@ -338,9 +339,10 @@ class McpProtocol implements MiddlewareInterface
                 ],
             ];
 
-            if (json_validate($error_content)) {
-                $payload['result']['structuredContent'] = json_decode($error_content, true, 512, JSON_THROW_ON_ERROR);
-            }
+            // Deliberately omit structuredContent for errors: an error body cannot
+            // satisfy the tool's outputSchema, and MCP clients reject a result whose
+            // structuredContent does not validate (e.g. "must have required property
+            // 'xref'"). The machine-readable error stays in the text content.
 
             // Never log tool content: it may contain private GEDCOM or base64.
             CustomModuleLog::addDebugLog($log_module, 'MCP error response: ' . $status_code . ' ' . $reason_phrase);
@@ -370,21 +372,14 @@ class McpProtocol implements MiddlewareInterface
             $output_stream->write($escaped_content);
             $output_stream->write('}]');
 
-            $output_stream->write(',"structuredContent":');
+            $structured_content = StructuredContent::objectOrNull($content);
 
-            // If valid JSON, write the content to the structured content representation in the output stream
-            if (json_validate($content)) {
-                $output_stream->write($content);
-            }
-            // Else write the content as text to the structured content representation in the output stream
-            else {
-                $output_stream->write('{"type": "text", "text":');
-                $output_stream->write($escaped_content);
-                $output_stream->write('}');
+            if ($structured_content !== null) {
+                $output_stream->write(',"structuredContent":');
+                $output_stream->write($structured_content);
             }
 
-            $json3 = ',"isError": false}}';
-            $output_stream->write($json3);
+            $output_stream->write(',"isError": false}}');
 
             // Rewind the destination stream to read its content
             $output_stream->rewind();

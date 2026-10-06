@@ -327,7 +327,12 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
 
         $record->updateRecord($modified_gedcom, false);
 
-        return api_response(array_merge(['xref' => $record->xref(), 'pending' => true], RecordVersion::fromGedcom($modified_gedcom)), StatusCodeInterface::STATUS_ACCEPTED);
+        return api_response(array_merge([
+            'xref' => $record->xref(),
+            'pending' => true,
+            'preserved-links' => $preserved_links,
+            'removed-links' => $removed_links,
+        ], RecordVersion::fromGedcom($modified_gedcom)), StatusCodeInterface::STATUS_ACCEPTED);
     }
 
     /**
@@ -381,6 +386,19 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
                 'type' => 'object',
                 'properties' => [
                     'xref' => McpSchema::XREF,
+                    'pending' => ['type' => 'boolean'],
+                    'preserved-links' => [
+                        'type' => 'array',
+                        'description' => 'Protected FAMS/FAMC/OBJE/CHIL links that were re-added because the submitted GEDCOM omitted them.',
+                        'items' => ['type' => 'string'],
+                    ],
+                    'removed-links' => [
+                        'type' => 'array',
+                        'description' => 'Protected links still missing after the write (only when remove-protected-links=true).',
+                        'items' => ['type' => 'string'],
+                    ],
+                    'version' => ['type' => 'string'],
+                    'hash' => ['type' => 'string'],
                 ],
                 'required' => ['xref'],
             ],
