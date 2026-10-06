@@ -5,11 +5,18 @@ declare(strict_types=1);
 namespace Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers;
 
 use DomainException;
+use Fisharebest\Webtrees\Auth;
+use Fisharebest\Webtrees\Contracts\UserInterface;
+use Fisharebest\Webtrees\Registry;
 use Fisharebest\Webtrees\Services\TreeService;
+use Fisharebest\Webtrees\Services\UserService;
+use Fisharebest\Webtrees\Session;
 use Fisharebest\Webtrees\Tree;
+use Fisharebest\Webtrees\Webtrees;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaInput;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaToken;
 use OpenApi\Attributes as OA;
+use Psr\Clock\ClockInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
@@ -47,25 +54,49 @@ final class MediaUpload implements RequestHandlerInterface
             if (!$tree instanceof Tree) {
                 throw new DomainException('Tree not found.', 404);
             }
-            $name = MediaInput::filename((string) $claims['file']);
-            $bytes = $this->readBody($request);
-            $this->claimOnce($id);
-            $input = [
-                'tree' => (string) $claims['tree'],
-                'target-xref' => (string) $claims['xref'],
-                'target-type' => (string) $claims['type'],
-                'filename' => $name,
-                'orig' => (string) ($claims['orig'] ?? ''),
-                'title' => (string) ($claims['title'] ?? ''),
-                'note' => (string) ($claims['note'] ?? ''),
-                'date' => (string) ($claims['date'] ?? ''),
-            ];
-            return $this->media->commitUpload($tree, $input, $bytes, $name, MediaInput::REST_LIMIT);
+            $this->loginFromToken($claims['user-id'] ?? null);
+            try {
+                $name = MediaInput::filename((string) $claims['file']);
+                $bytes = $this->readBody($request);
+                $this->claimOnce($id);
+                $input = [
+                    'tree' => (string) $claims['tree'],
+                    'target-xref' => (string) $claims['xref'],
+                    'target-type' => (string) $claims['type'],
+                    'filename' => $name,
+                    'orig' => (string) ($claims['orig'] ?? ''),
+                    'title' => (string) ($claims['title'] ?? ''),
+                    'note' => (string) ($claims['note'] ?? ''),
+                    'date' => (string) ($claims['date'] ?? ''),
+                ];
+                return $this->media->commitUpload($tree, $input, $bytes, $name, MediaInput::REST_LIMIT);
+            } finally {
+                Auth::logout();
+            }
         } catch (DomainException $e) {
             return api_response($e->getMessage(), $e->getCode() ?: 400);
         } catch (Throwable) {
             return api_response('Staged upload failed. Verify the record before retrying.', 500);
         }
+    }
+
+    /** Restore the identity that passed create-media-upload's access checks. */
+    private function loginFromToken(mixed $value): void
+    {
+        $userId = is_int($value) || is_string($value) ? (int) $value : 0;
+        if ($userId <= 0) {
+            throw new DomainException('Upload token has no valid webtrees identity.', 403);
+        }
+        $userService = version_compare(Webtrees::VERSION, '2.3', '>=')
+            ? new UserService(Registry::container()->get(ClockInterface::class))
+            : new UserService();
+        $user = $userService->find($userId);
+        if (!$user instanceof UserInterface) {
+            throw new DomainException('Upload token refers to an unknown webtrees user.', 403);
+        }
+        Auth::login($user);
+        Session::put('language', $user->getPreference(UserInterface::PREF_LANGUAGE));
+        Registry::container()->set(UserInterface::class, $user);
     }
 
     /** Read at most REST_LIMIT bytes, whether or not the client declared a length. */

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers;
 
 use DomainException;
+use Fisharebest\Webtrees\Auth;
 use Fisharebest\Webtrees\Services\TreeService;
 use Fisharebest\Webtrees\Tree;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaInput;
@@ -38,6 +39,10 @@ final class CreateMediaUpload implements WebtreesMcpToolRequestHandlerInterface
             if (!$tree instanceof Tree) {
                 throw new DomainException('Tree not found.', 404);
             }
+            $userId = (int) $request->getAttribute('oauth_user_id', 0);
+            if ($userId <= 0 || !Auth::user()) {
+                throw new DomainException('Staged uploads require an authenticated webtrees user.', 403);
+            }
             $this->media->validateUploadTarget($tree, $input);
             $key = MediaToken::moduleKey();
             $base = rtrim((string) $request->getAttribute('base_url', ''), '/');
@@ -54,6 +59,9 @@ final class CreateMediaUpload implements WebtreesMcpToolRequestHandlerInterface
                 'title' => MediaInput::text($input, 'title'),
                 'note' => MediaInput::text($input, 'note'),
                 'date' => MediaInput::text($input, 'date'),
+                // The PUT route deliberately has no OAuth middleware. Bind its
+                // capability to the user who passed the normal access checks.
+                'user-id' => $userId,
                 'id' => bin2hex(random_bytes(16)),
             ];
             $token = MediaToken::sign($claims, $key, self::TTL);
