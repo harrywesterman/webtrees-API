@@ -544,8 +544,14 @@ class SearchGeneral implements WebtreesMcpToolRequestHandlerInterface
                             'properties' => [
                                 'tree' => McpSchema::TREE,
                                 'xref' => McpSchema::XREF,
+                                'gedcom_data' => [
+                                    'oneOf' => [
+                                        ['type' => 'object'],
+                                        ['type' => 'string'],
+                                    ],
+                                ],
                             ],
-                            'required' => ['tree', 'xref'],
+                            'required' => ['tree', 'xref', 'gedcom_data'],
                         ],
                     ],
                 ],

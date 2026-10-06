@@ -507,7 +507,16 @@ class Media implements RequestHandlerInterface
     private function check(ResponseInterface $response): void
     {
         if ($response->getStatusCode() !== 200) {
-            throw new DomainException('Access denied by webtrees record, tree or privacy settings.', $response->getStatusCode());
+            $body = trim((string) $response->getBody());
+            $payload = json_decode($body, true);
+            if (is_array($payload) && is_array($payload['error'] ?? null)) {
+                $upstream_code = (string) ($payload['error']['code'] ?? '');
+                $body = trim((string) ($payload['error']['message'] ?? $body));
+                if ($upstream_code !== '') {
+                    $body = $upstream_code . ': ' . $body;
+                }
+            }
+            throw new DomainException($body !== '' ? $body : $response->getReasonPhrase(), $response->getStatusCode());
         }
     }
 }

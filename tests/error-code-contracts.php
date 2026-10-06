@@ -17,6 +17,9 @@ function check(bool $condition, string $message): void
 
 check(str_contains($source, "'token_invalid'"), 'Unauthorized responses expose token_invalid');
 check(str_contains($source, "'scope_missing'"), 'Forbidden responses expose scope_missing');
+check(str_contains($source, "'record_privacy_denied'"), 'Privacy denials have a stable code');
+check(str_contains($source, "'record_access_denied'"), 'Record access denials have a stable code');
+check(str_contains($source, "'access_denied'"), 'Generic forbidden responses have a stable code');
 check(str_contains($source, "'protected_links_would_be_removed'"), 'Protected-link conflicts have a stable code');
 check(str_contains($source, "'pending_conflict'"), 'Pending conflicts have a stable code');
 check(str_contains($source, "'inline_upload_too_large'"), '413 responses have a stable upload code');

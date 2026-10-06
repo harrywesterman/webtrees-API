@@ -309,9 +309,6 @@ class GetRecord implements WebtreesMcpToolRequestHandlerInterface
                 ],
                 'required' => ['tree', 'xref']
             ],
-            'outputSchema' => [
-                'type' => 'object',
-            ],
             'annotations' => [
                 'title' => WebtreesApi::PATH_GET_RECORD,
                 'readOnlyHint' => true,

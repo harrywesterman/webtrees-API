@@ -57,11 +57,20 @@ function api_response(array|object|string $content = '', int $code = StatusCodeI
     // Keep failures machine-readable for API and MCP clients while retaining
     // the original human-readable message.
     if ($code >= 400 && is_string($content)) {
+        $lower_content = strtolower($content);
+        $explicit_code = null;
+        if (preg_match('/^\\s*([a-z][a-z0-9_]+):/', $lower_content, $matches) === 1) {
+            $explicit_code = $matches[1];
+        }
         $content = [
             'error' => [
                 'code' => match (true) {
                     $code === StatusCodeInterface::STATUS_UNAUTHORIZED => 'token_invalid',
-                    $code === StatusCodeInterface::STATUS_FORBIDDEN => 'scope_missing',
+                    $code === StatusCodeInterface::STATUS_FORBIDDEN && $explicit_code !== null => $explicit_code,
+                    $code === StatusCodeInterface::STATUS_FORBIDDEN && str_contains($lower_content, 'privacy') => 'record_privacy_denied',
+                    $code === StatusCodeInterface::STATUS_FORBIDDEN && str_contains($lower_content, 'no access to record') => 'record_access_denied',
+                    $code === StatusCodeInterface::STATUS_FORBIDDEN && (str_contains($lower_content, 'scope') || str_contains($lower_content, 'media permissions')) => 'scope_missing',
+                    $code === StatusCodeInterface::STATUS_FORBIDDEN => 'access_denied',
                     $code === StatusCodeInterface::STATUS_CONFLICT && str_contains(strtolower($content), 'protected') => 'protected_links_would_be_removed',
                     $code === StatusCodeInterface::STATUS_CONFLICT && str_contains(strtolower($content), 'uncertain') => 'upload_commit_uncertain',
                     $code === StatusCodeInterface::STATUS_CONFLICT && str_contains(strtolower($content), 'pending') => 'pending_conflict',
