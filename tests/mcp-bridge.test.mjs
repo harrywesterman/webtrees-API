@@ -6,6 +6,38 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { Bridge, CHUNK } from '../bin/webtrees-mcp.mjs';
 
+test('JSON-RPC errors retain remote message, code and data', async () => {
+  const bridge = new Bridge({ endpoint: 'https://example.test/mcp', token: 'test', fetchImpl: async (url, init) => {
+    const rpc = JSON.parse(init.body);
+    return { ok: true, json: async () => ({ jsonrpc: '2.0', id: rpc.id, error: {
+      code: -32603, message: 'Multiple TITL fields require manual editing.', data: { xref: 'S1', status: 409 },
+    } }) };
+  } });
+  await assert.rejects(bridge.rpc('tools/call', { name: 'modify-source' }), error => {
+    assert.match(error.message, /-32603: Multiple TITL fields require manual editing\./);
+    assert.equal(error.code, -32603);
+    assert.deepEqual(error.data, { xref: 'S1', status: 409 });
+    return true;
+  });
+});
+
+test('source tool errors pass through the bridge with their explanation', async () => {
+  const remote = { isError: true, content: [{ type: 'text', text: '409: Conflict Multiple TITL fields require manual editing.' }] };
+  const bridge = new Bridge({ endpoint: 'https://example.test/mcp', token: 'test', fetchImpl: async (url, init) => {
+    const rpc = JSON.parse(init.body);
+    return { ok: true, json: async () => ({ jsonrpc: '2.0', id: rpc.id, result: remote }) };
+  } });
+  assert.deepEqual(await bridge.handle({ method: 'tools/call', params: { name: 'modify-source', arguments: { tree: 'test', xref: 'S1', title: 'New' } } }), remote);
+});
+
+test('JSON-RPC errors without a message have a useful fallback', async () => {
+  const bridge = new Bridge({ endpoint: 'https://example.test/mcp', token: 'test', fetchImpl: async (url, init) => {
+    const rpc = JSON.parse(init.body);
+    return { ok: true, json: async () => ({ jsonrpc: '2.0', id: rpc.id, error: { code: -32603 } }) };
+  } });
+  await assert.rejects(bridge.rpc('ping'), /Remote MCP error -32603: request failed/);
+});
+
 test('large local image uploads through a signed URL, never as base64', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'webtrees-bridge-'));
   try {
@@ -82,7 +114,7 @@ test('download-media still accepts the legacy base64 fallback', async () => {
   await rm(result.structuredContent['local-path'], { force: true });
 });
 
-test('upload-media-batch transfers multiple local images in one MCP call', async () => {
+test('upload-media-batch stages multiple targets without base64, then PUTs raw bytes', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'webtrees-bridge-'));
   try {
     const first = join(dir, 'one.png'); const second = join(dir, 'two.jpg');
@@ -90,14 +122,43 @@ test('upload-media-batch transfers multiple local images in one MCP call', async
     let calls = 0;
     const bridge = new Bridge({ endpoint: 'https://example.test/mcp', token: 'test', roots: [dir], fetchImpl: async (url, init) => {
       calls++;
+      if (init.method === 'PUT') {
+        const index = url.endsWith('/one') ? 0 : 1;
+        assert.equal(init.body.toString(), index === 0 ? 'first' : 'second');
+        return { ok: true, json: async () => ({ xref: `M${index + 1}`, pending: true, 'target-xref': index === 0 ? 'I1' : 'I2', hash: 'h', version: 'h', records: [] }) };
+      }
       const rpc = JSON.parse(init.body); assert.equal(rpc.params.name, 'upload-media-batch');
+      assert.equal(init.body.includes('base64'), false);
       const files = rpc.params.arguments.files; assert.equal(files.length, 2);
-      assert.equal(files[0]['local-path'], undefined); assert.equal(Buffer.from(files[0]['content-base64'], 'base64').toString(), 'first');
-      assert.equal(Buffer.from(files[1]['content-base64'], 'base64').toString(), 'second');
-      return { ok: true, json: async () => ({ jsonrpc: '2.0', id: rpc.id, result: { content: [{ type: 'text', text: '{"pending":true}' }] } }) };
+      assert.equal(files[0]['local-path'], undefined); assert.equal(files[0].filename, 'one.png');
+      assert.equal(files[1]['target-xref'], 'I2');
+      return { ok: true, json: async () => ({ jsonrpc: '2.0', id: rpc.id, result: { structuredContent: { files: [
+        { 'upload-url': 'https://example.test/one', 'max-bytes': 100 }, { 'upload-url': 'https://example.test/two', 'max-bytes': 100 },
+      ] } } }) };
     } });
-    const result = await bridge.handle({ method: 'tools/call', params: { name: 'upload-media-batch', arguments: { tree: 'test', 'target-xref': 'I1', 'target-type': 'INDI', files: [{ 'local-path': first }, { 'local-path': second, title: 'Two' }] } } });
-    assert.equal(calls, 1); assert.equal(result.content[0].text, '{"pending":true}');
+    const result = await bridge.handle({ method: 'tools/call', params: { name: 'upload-media-batch', arguments: { tree: 'test', 'target-xref': 'I1', 'target-type': 'INDI', files: [{ 'local-path': first }, { 'local-path': second, 'target-xref': 'I2', title: 'Two' }] } } });
+    assert.equal(calls, 3); assert.deepEqual(result.structuredContent.files.map(file => file.xref), ['M1', 'M2']);
+  } finally { await rm(dir, { recursive: true }); }
+});
+
+test('staged batch failure reports completed xrefs without retrying', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'webtrees-bridge-'));
+  try {
+    const file = join(dir, 'one.png'); await writeFile(file, 'first');
+    let puts = 0;
+    const bridge = new Bridge({ endpoint: 'https://example.test/mcp', token: 'test', roots: [dir], fetchImpl: async (url, init) => {
+      if (init.method === 'PUT') {
+        puts++;
+        if (puts === 2) throw new Error('timeout');
+        return { ok: true, json: async () => ({ xref: 'M1', pending: true, 'target-xref': 'I1' }) };
+      }
+      const rpc = JSON.parse(init.body);
+      return { ok: true, json: async () => ({ jsonrpc: '2.0', id: rpc.id, result: { structuredContent: { files: [
+        { 'upload-url': 'https://example.test/one', 'max-bytes': 100 }, { 'upload-url': 'https://example.test/two', 'max-bytes': 100 },
+      ] } } }) };
+    } });
+    await assert.rejects(bridge.uploadBatch({ tree: 'test', 'target-xref': 'I1', 'target-type': 'INDI', files: [{ 'local-path': file }, { 'local-path': file }] }), /Previously completed media xrefs: M1/);
+    assert.equal(puts, 2);
   } finally { await rm(dir, { recursive: true }); }
 });
 

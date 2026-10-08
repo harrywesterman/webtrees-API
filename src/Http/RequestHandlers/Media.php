@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers;
 
 use DomainException;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\PendingChangeDetails;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordSnapshot;
 use Fisharebest\Webtrees\DB;
 use Fisharebest\Webtrees\GedcomRecord;
 use Fisharebest\Webtrees\Media as MediaRecord;
@@ -196,7 +199,7 @@ class Media implements RequestHandlerInterface
                     }
                 }
                 if ($gedcom === $record->gedcom()) {
-                    return api_response(['xref' => $record->xref(), 'changed' => false], 200);
+                    return api_response(RecordVersion::receipt($tree, ['xref' => $record->xref(), 'changed' => false], [$record]), 200);
                 }
                 $this->mutate([$record], fn () => $record->updateRecord($gedcom, true));
             } elseif ($action === 'delete-media') {
@@ -207,15 +210,15 @@ class Media implements RequestHandlerInterface
                 $this->mutate([$record], function () use ($record, $tree) {
                     // The link index excludes pending GEDCOM; also reject pending references.
                     $reference = '@' . $record->xref() . '@';
-                    foreach (DB::table('change')->where('gedcom_id', $tree->id())->where('status', 'pending')->get(['new_gedcom']) as $change) {
+                    foreach (DB::table('change')->where('gedcom_id', $tree->id())->where('status', 'pending')->get(['new_gedcom', 'change_id', 'xref']) as $change) {
                         if (str_contains($change->new_gedcom, $reference)) {
-                            throw new DomainException('Pending changes reference this media. Review them before deleting.', 409);
+                            throw new DomainException('Pending changes reference media xref=' . $record->xref() . '; change-id=' . $change->change_id . '; blocking-xref=' . $change->xref, 409);
                         }
                     }
                     $record->deleteRecord();
                 });
-                return api_response(['xref' => $record->xref(), 'pending' => true, 'file-retained' => true,
-                    'message' => 'Deletion awaits moderator approval. Files are retained for shared references and rejection; an administrator may clean unused files in webtrees.'], 202);
+                return api_response(RecordVersion::receipt($tree, ['xref' => $record->xref(), 'pending' => true, 'file-retained' => true,
+                    'message' => 'Deletion awaits moderator approval. Files are retained for shared references and rejection; an administrator may clean unused files in webtrees.'], [$record]), 202);
             } else {
                 $target = $this->target($tree, $input);
                 $line = "\n1 OBJE @" . $record->xref() . '@';
@@ -226,13 +229,13 @@ class Media implements RequestHandlerInterface
                 // blocked merely because the target has an unrelated pending
                 // change; no record is written in this branch.
                 if (($action === 'link-media' && $linked) || ($action === 'unlink-media' && !$linked)) {
-                    return api_response(['xref' => $record->xref(), 'target-xref' => $target->xref(), 'changed' => false], 200);
+                    return api_response(RecordVersion::receipt($tree, ['xref' => $record->xref(), 'target-xref' => $target->xref(), 'changed' => false], [$target, $record]), 200);
                 }
                 $this->editable($target);
                 $new = $action === 'link-media' ? ($linked ? $old : $old . $line) : preg_replace($pattern, '', $old);
                 $this->mutate([$record, $target], fn () => $target->updateRecord($new, true));
             }
-            return api_response(['xref' => $record->xref(), 'pending' => true, 'message' => 'Change submitted. A moderator must approve it in webtrees.'], 202);
+            return api_response(RecordVersion::receipt($tree, ['xref' => $record->xref(), 'target-xref' => isset($target) ? $target->xref() : null, 'pending' => true, 'message' => 'Change submitted. A moderator must approve it in webtrees.'], isset($target) ? [$target, $record] : [$record]), 202);
         } catch (DomainException $e) {
             return api_response($e->getMessage(), $e->getCode() ?: 400);
         } catch (\JsonException) {
@@ -294,6 +297,7 @@ class Media implements RequestHandlerInterface
     /** Commit raw bytes supplied by the signed staged-upload route. */
     public function commitUpload(Tree $tree, array $input, string $bytes, string $name, int $limit): ResponseInterface
     {
+        $this->check(CheckAccess::checkUserWriteAccess($tree));
         $target = $this->target($tree, $input);
         $this->editable($target);
         return $this->persistUpload($tree, $target, $input, $bytes, $name, $limit);
@@ -333,9 +337,9 @@ class Media implements RequestHandlerInterface
             }
             throw $e;
         }
-        return api_response(['xref' => $record->xref(), 'filename' => $path, 'mime-type' => $mime,
+        return api_response(RecordVersion::receipt($tree, ['xref' => $record->xref(), 'filename' => $path, 'mime-type' => $mime,
             'target-xref' => $target->xref(), 'pending' => true,
-            'message' => 'Upload stored; approve BOTH the media record and target link in webtrees. Do not repeat the upload.'], 201);
+            'message' => 'Upload stored; approve BOTH the media record and target link in webtrees. Do not repeat the upload.'], [$record, $target]), 201);
     }
 
     /** Upload several media files and create one pending target-record change. */
@@ -362,6 +366,9 @@ class Media implements RequestHandlerInterface
             $prepared = [];
             foreach ($files as $file) {
                 if (!is_array($file)) throw new DomainException('Each files item must be an object.', 400);
+                if (($file['target-xref'] ?? $target->xref()) !== $target->xref() || ($file['target-type'] ?? $target->tag()) !== $target->tag()) {
+                    throw new DomainException('Legacy inline batches support one target; use staged URLs for multiple targets.', 400);
+                }
                 $name = MediaInput::filename(is_string($file['filename'] ?? null) ? $file['filename'] : '');
                 $encoded = $file['content-base64'] ?? null;
                 if (!is_string($encoded) || $encoded === '') throw new DomainException('Each files item needs content-base64.', 400);
@@ -390,17 +397,19 @@ class Media implements RequestHandlerInterface
             $created = $this->mutate([$target], function () use ($tree, $target, $prepared): array {
                 $links = '';
                 $created = [];
+                $written = [];
                 foreach ($prepared as $item) {
                     $record = $tree->createRecord($item['gedcom']);
                     $links .= "\n1 OBJE @" . $record->xref() . '@';
-                    $created[] = ['xref' => $record->xref(), 'filename' => $item['path'], 'mime-type' => $item['mime']];
+                    $written[] = $record;
+                    $created[] = ['xref' => $record->xref(), 'filename' => $item['path'], 'mime-type' => $item['mime'], ...RecordVersion::fromRecord($record)];
                 }
                 $target->updateRecord($target->gedcom() . $links, true);
-                return $created;
+                return RecordVersion::receipt($tree, ['files' => $created, 'target-xref' => $target->xref(), 'pending' => true,
+                    'message' => 'Batch upload stored; approve all media records and the target link. Do not repeat the batch.'], [$target, ...$written]);
             });
 
-            return api_response(['files' => $created, 'target-xref' => $target->xref(), 'pending' => true,
-                'message' => 'Batch upload stored; approve all media records and the target link. Do not repeat the batch.'], 201);
+            return api_response($created, 201);
         } catch (DomainException $e) {
             foreach ($paths as $path) { try { ($tree ?? null)?->mediaFilesystem()->delete($path); } catch (Throwable) {} }
             return api_response($e->getMessage(), $e->getCode() ?: 400);
@@ -429,15 +438,12 @@ class Media implements RequestHandlerInterface
         if ($record === null) { throw new DomainException('Record not found.', 404); }
         $this->check(CheckAccess::checkRecordAccess($record, $edit));
         if ($privacy) { $this->check(CheckAccess::checkRecordAccess($record, false, true)); }
-        if ($record->isPendingDeletion()) { throw new DomainException('Record has a pending deletion.', 409); }
+        if ($record->isPendingDeletion()) { $this->pendingConflict($record, 'Record has a pending deletion'); }
         return $record;
     }
 
     private function editable(GedcomRecord $record): void
     {
-        if ($record->isPendingAddition()) {
-            throw new DomainException('Record has pending changes. Have a moderator review them before another media edit.', 409);
-        }
         $all = Functions::getRecordFacts($record, [], false, Auth::PRIV_HIDE, true);
         $visible = Functions::getRecordFacts($record, [], false, Authorization::accessLevelForTree($record->tree()), true);
         if ($all->count() !== $visible->count()) {
@@ -489,19 +495,29 @@ class Media implements RequestHandlerInterface
         return hash_final($context);
     }
 
-    /** Serialize media writes per tree and reject pending changes missed by cached record objects. */
+    /** Serialize media writes per tree; allow pending snapshots and reject stale cached record objects. */
     private function mutate(array $records, callable $write): mixed
     {
         return DB::connection()->transaction(function () use ($records, $write) {
             $tree = $records[0]->tree();
             DB::table('gedcom')->where('gedcom_id', $tree->id())->lockForUpdate()->first();
             foreach ($records as $record) {
-                if (DB::table('change')->where('gedcom_id', $tree->id())->where('xref', $record->xref())->where('status', 'pending')->exists()) {
-                    throw new DomainException('Concurrent or pending record change; review it before retrying.', 409);
+                // Queue against the exact latest snapshot. Never overwrite a
+                // concurrent edit using a record cached before acquiring the lock.
+                $snapshot = RecordSnapshot::read($record);
+                if (!$snapshot['current']) {
+                    $this->pendingConflict($record, 'Concurrent record change; reload the current record', $snapshot['pending']);
                 }
             }
             return $write();
         });
+    }
+
+    private function pendingConflict(GedcomRecord $record, string $reason, ?array $rows = null): never
+    {
+        $rows ??= PendingChangeDetails::lockedRows($record->tree(), $record->xref());
+        $ids = array_map(static fn (object $row): string => (string) $row->change_id, $rows);
+        throw new DomainException($reason . '; xref=' . $record->xref() . '; change-id=' . implode(',', $ids), 409);
     }
 
     private function check(ResponseInterface $response): void

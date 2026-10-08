@@ -270,8 +270,21 @@ class McpProtocol implements MiddlewareInterface
         }
 
         // Get the tool descriptions
+        new McpToolPermission();
         foreach ($tools as $tool) {
-            $tool_descriptions[] = $tool::getMcpToolDescription();
+            $description = $tool::getMcpToolDescription();
+            if (in_array($description['name'], McpToolPermission::$mcp_write_tools, true)) {
+                $description['outputSchema'] ??= ['type' => 'object'];
+                $description['outputSchema']['properties'] ??= [];
+                $description['outputSchema']['properties'] += [
+                    'hash' => ['type' => 'string', 'description' => 'SHA-256 of the primary record identified by xref, target-xref or family-xref. Available after a record write, not while staging URLs.'],
+                    'version' => ['type' => 'string', 'description' => 'Alias of hash. Pass to verify-write with the corresponding record xref.'],
+                    'records' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => [
+                        'xref' => ['type' => 'string'], 'hash' => ['type' => 'string'], 'version' => ['type' => 'string'], 'state' => ['type' => 'string'],
+                    ]], 'description' => 'Receipts for all affected records. Compare each xref/hash with verify-write.'],
+                ];
+            }
+            $tool_descriptions[] = $description;
         }
 
         return $tool_descriptions;

@@ -31,8 +31,8 @@ final class MediaTools
             } else {
                 $contentType = 'application/json';
                 if ($action === 'upload-media') {
-                    unset($schema['properties']['content-base64'], $schema['properties']['filename']);
-                    $schema['properties']['file'] = ['type' => 'string', 'format' => 'binary', 'description' => 'JPEG/PNG/GIF/WebP, up to 20 MiB and 40 megapixels; also subject to PHP limits.'];
+                    unset($schema['properties']['content-base64'], $schema['properties']['legacy-inline'], $schema['properties']['filename']);
+                    $schema['properties']['file'] = ['type' => 'string', 'format' => 'binary', 'description' => 'JPEG/PNG/GIF/WebP/PDF, up to 20 MiB and 40 megapixels; also subject to PHP limits.'];
                     $schema['required'] = ['tree', 'target-xref', 'target-type', 'file'];
                     $contentType = 'multipart/form-data';
                     $operation['description'] = 'Upload actual image bytes as multipart/form-data. A new OBJE record and target link await moderator approval. Each request creates a distinct file; do not blindly retry. Filename is taken from the file part.';
@@ -66,7 +66,8 @@ final class MediaTools
             $tool['inputSchema']['properties']['target-xref']['pattern'] = '^[A-Za-z0-9_:-]{1,64}$';
             $tool['inputSchema']['properties']['content-base64'] = ['type' => 'string', 'maxLength' => 349528,
                 'description' => 'Canonical base64, at most 262144 decoded bytes. Empty allowed only for finalization at total-bytes.'];
-            $tool['inputSchema']['required'] = array_merge($tool['inputSchema']['required'], ['upload-id', 'offset', 'total-bytes', 'sha256', 'final']);
+            unset($tool['inputSchema']['properties']['legacy-inline']);
+            $tool['inputSchema']['required'] = array_merge($tool['inputSchema']['required'], ['content-base64', 'upload-id', 'offset', 'total-bytes', 'sha256', 'final']);
             $tool['annotations']['title'] = $action;
             $tool['annotations']['idempotentHint'] = true;
             return $tool;
@@ -88,16 +89,17 @@ final class MediaTools
         }
         if ($action === 'upload-media') {
             unset($properties['xref']);
-            $required = ['tree', 'target-xref', 'target-type', 'filename', 'content-base64'];
+            $required = ['tree', 'target-xref', 'target-type', 'filename'];
+            $properties['legacy-inline'] = ['type' => 'boolean', 'default' => false, 'description' => 'Explicit compatibility opt-in for inline content-base64. Omit bytes to receive a signed upload-url.'];
             $properties['filename'] = ['type' => 'string', 'maxLength' => 180, 'description' => 'Basename including JPEG/PNG/GIF/WebP extension, never a path.'];
             $properties['content-base64'] = ['type' => 'string', 'maxLength' => MediaInput::maxBase64Length(),
                 'description' => 'Legacy inline transport for actual local image bytes encoded as canonical base64, at most 512 KiB decoded. For larger files use the local MCP bridge with local-path (up to 20 MiB, mcp_write), which transfers every chunk through MCP. Authenticated multipart REST POST /api/media with api_write remains a compatibility fallback only. Use a file/terminal tool to encode it; never invent bytes. No data URL prefix or whitespace.'];
         }
         $description = match ($action) {
-            'upload-media' => 'Upload a local image and link it to a verified INDI/FAM/SOUR. First get-trees and get-record. Preferred path without base64: call create-media-upload to get a signed upload-url, then PUT the raw bytes there (up to 20 MiB, JPEG/PNG/GIF/WebP/PDF). The local MCP bridge does this automatically from local-path. Inline base64 is legacy and only up to 512 KiB decoded; multipart REST is a compatibility fallback. Never put secrets or base64 in query URLs. On success retain the returned media XREF and do not upload again: BOTH record and link await moderator approval.',
+            'upload-media' => 'Upload a local image and link it to a verified INDI/FAM/SOUR. First get-trees and get-record. Omit content-base64 to receive a signed upload-url from this tool; PUT raw file bytes there. For multiple files or targets call create-media-upload to get a signed upload-url, then PUT the raw bytes there (up to 20 MiB, JPEG/PNG/GIF/WebP/PDF). The local MCP bridge does this automatically from local-path. Inline base64 requires legacy-inline=true and is only up to 512 KiB decoded; multipart REST is a compatibility fallback. Never put secrets or base64 in query URLs. On success retain the returned media XREF and do not upload again: BOTH record and link await moderator approval.',
             'get-media' => 'Read visible media filenames, metadata, webtrees page URL and pending status. Each file includes a short-lived signed preview-url (thumbnail) and content-url (original bytes) so you can view or fetch it without downloading base64; the webtrees page URL is not a public file URL. Authenticated REST GET /media/download remains available.',
-            'update-media' => 'Submit a media metadata change. Omitted fields remain unchanged; empty fields clear one value. Multiple titles/files or notes may require editing in webtrees. Await moderator approval before another write.',
-            'link-media' => 'Link approved media to an existing verified person, family or source at record level. An existing link is a no-op only when both records have no pending changes. Pending records return 409 even for a repeated link; await moderator approval.',
+            'update-media' => 'Submit a media metadata change. Omitted fields remain unchanged; empty fields clear one value. Multiple titles/files or notes may require editing in webtrees. Further edits queue against the latest pending version; concurrent stale writes return 409 with change-id and xref.',
+            'link-media' => 'Link approved media to an existing verified person, family or source at record level. An existing link is a no-op. Links queue against the latest pending version; stale concurrent writes return 409 with change-id and xref.',
             'unlink-media' => 'Remove the record-level media link from the selected target, preserving its other facts and links. Event-level links must be edited in webtrees. Await moderator approval.',
             'delete-media' => 'Request deletion of an unlinked approved media record. Unlink and approve all links first. The file is deliberately retained for pending/rejected changes and shared references; administrator cleanup of unused files is separate.',
         };

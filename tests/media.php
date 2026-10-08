@@ -6,14 +6,40 @@ namespace {
     if (!$root) { exit("Set WEBTREES_TEST_ROOT to an unpacked webtrees 2.2 release.\n"); }
     require $root . '/vendor/autoload.php';
     require __DIR__ . '/../vendor/autoload.php';
+    $common = new Composer\Autoload\ClassLoader();
+    foreach (['Module', 'Exceptions', 'Log', 'Helpers', 'Internationalization'] as $ns) {
+        $common->addPsr4('Jefferson49\\Webtrees\\' . $ns . '\\', __DIR__ . '/../vendor/jefferson49/webtrees-common/' . $ns);
+    }
+    $common->register();
+}
+namespace Fisharebest\Webtrees\Contracts {
+    interface UserInterface { public const PREF_LANGUAGE = 'language'; }
 }
 namespace Fisharebest\Webtrees {
+    class Auth {
+        public static bool $manager = true;
+        public static function id() { return 1; }
+        public static function user() { return new class implements \Fisharebest\Webtrees\Contracts\UserInterface { public function userName() { return 'editor'; } public function getPreference($key) { return 'en'; } }; }
+        public static function isManager($tree) { return self::$manager; }
+        public static function login($user) {}
+        public static function logout() {}
+    }
+    class Session { public static function put($key, $value) {} }
     class DB extends \Illuminate\Database\Capsule\Manager {}
     class Registry {
         public static array $records = [];
         public static $container;
+        public static int $nextXref = 1000;
+        public static function xrefFactory() { return new class { public function make($type) { return 'X' . ++Registry::$nextXref; } }; }
         public static function container($container = null) { if ($container !== null) { self::$container = $container; } return self::$container; }
-        public static function gedcomRecordFactory() { return new class { public function make($id, $tree) { return Registry::$records[$id] ?? null; } }; }
+        public static function gedcomRecordFactory() { return new class { public function make($id, $tree) {
+            if (isset(Registry::$records[$id])) return Registry::$records[$id];
+            $change = DB::table('change')->where('xref', $id)->whereIn('status', ['pending', 'accepted'])->orderByDesc('change_id')->first();
+            if ($change === null || $change->new_gedcom === '') return null;
+            $record = new GedcomRecord($id, $change->new_gedcom, $tree, false);
+            $record->pending = $change->status === 'pending';
+            return $record;
+        } }; }
     }
     class Tree {
         public function __construct(public $fs) {}
@@ -22,18 +48,29 @@ namespace Fisharebest\Webtrees {
         public function mediaFilesystem() { return $this->fs; }
         public function createRecord($gedcom) {
             $id = 'M' . (count(Registry::$records) + 10);
-            $record = new Media($id, str_replace('@@', '@' . $id . '@', $gedcom), $this);
+            $record = new Media($id, str_replace('@@', '@' . $id . '@', $gedcom), $this, false);
             Registry::$records[$id] = $record;
             $record->updateRecord($record->data, true);
             return $record;
         }
     }
     class GedcomRecord {
+        public const RECORD_TYPE = 'UNKNOWN';
         public bool $pending = false;
         public bool $private = false;
         public bool $fail = false;
         public bool $hiddenFacts = false;
-        public function __construct(private string $id, public string $data, private Tree $tree) {}
+        public function __construct(private string $id, public string $data, private Tree $tree, bool $approved = true) {
+            if ($approved) $this->storeApproved();
+        }
+        public function storeApproved() {
+            if ($this->data === '') {
+                foreach (['individuals'=>'i', 'families'=>'f', 'sources'=>'s', 'media'=>'m', 'other'=>'o'] as $table=>$p) DB::table($table)->where($p . '_id', $this->id)->delete();
+                return;
+            }
+            [$table, $p] = match ($this->tag()) { 'INDI' => ['individuals','i'], 'FAM' => ['families','f'], 'SOUR' => ['sources','s'], 'OBJE' => ['media','m'], default => ['other','o'] };
+            DB::table($table)->updateOrInsert([$p . '_file' => 1, $p . '_id' => $this->id], [$p . '_gedcom' => $this->data]);
+        }
         public function xref() { return $this->id; }
         public function tree() { return $this->tree; }
         public function gedcom() { return $this->data; }
@@ -43,7 +80,12 @@ namespace Fisharebest\Webtrees {
         public function url() { return 'https://example.test/media/' . $this->id; }
         public function updateRecord($gedcom, $chan) {
             if ($this->fail) { throw new \RuntimeException('Injected failure'); }
-            DB::table('change')->insert(['gedcom_id' => 1, 'xref' => $this->id, 'status' => 'pending', 'new_gedcom' => $gedcom]);
+            if ($chan) {
+                $gedcom = preg_replace('/\n1 CHAN(?:\n[2-9] [^\n]*)*/', '', $gedcom) . "\n1 CHAN\n2 DATE 8 OCT 2026\n3 TIME 00:00:01";
+            }
+            DB::table('change')->insert(['gedcom_id' => 1, 'xref' => $this->id, 'status' => 'pending', 'old_gedcom' => $this->data, 'new_gedcom' => $gedcom]);
+            $this->data = $gedcom;
+            $this->pending = true;
         }
         public function deleteRecord() { $this->updateRecord('', false); }
     }
@@ -55,9 +97,10 @@ namespace Fisharebest\Webtrees {
     }
 }
 namespace Fisharebest\Webtrees\Services {
+    class UserService { public function find($id) { return $id === 1 ? \Fisharebest\Webtrees\Auth::user() : null; } }
     class TreeService {
         public function __construct(private $tree) {}
-        public function all() { return ['test' => $this->tree]; }
+        public function all() { return new \Illuminate\Support\Collection(['test' => $this->tree]); }
     }
     class LinkedRecordService {
         public array $linked = [];
@@ -125,7 +168,11 @@ namespace {
     $db->setAsGlobal();
     DB::schema()->create('gedcom', function ($t) { $t->integer('gedcom_id'); });
     DB::table('gedcom')->insert(['gedcom_id' => 1]);
-    DB::schema()->create('change', function ($t) { $t->integer('gedcom_id'); $t->string('xref'); $t->string('status'); $t->text('new_gedcom'); });
+    foreach (['individuals' => 'i', 'families' => 'f', 'sources' => 's', 'media' => 'm', 'other' => 'o'] as $table => $p) {
+        DB::schema()->create($table, function ($t) use ($p) { $t->integer($p . '_file'); $t->string($p . '_id'); $t->text($p . '_gedcom'); });
+    }
+    DB::schema()->create('change', function ($t) { $t->increments('change_id'); $t->integer('gedcom_id'); $t->integer('user_id')->nullable(); $t->text('old_gedcom')->default(''); $t->string('xref'); $t->string('status'); $t->text('new_gedcom'); });
+    DB::schema()->create('user', function ($t) { $t->integer('user_id'); $t->string('user_name'); $t->string('real_name'); });
     DB::schema()->create('media_file', function ($t) { $t->integer('m_file'); $t->string('multimedia_file_refn'); });
     $dir = sys_get_temp_dir() . '/media-behavior-' . bin2hex(random_bytes(6));
     mkdir($dir, 0700);
@@ -140,7 +187,7 @@ namespace {
         $r = (new ServerRequest($method, 'https://example.test/api/media'))->withAttribute('oauth_scopes', [$scope]);
         return $method === 'GET' ? $r->withQueryParams($input) : $r->withParsedBody($input);
     }
-    function approved() { DB::table('change')->delete(); }
+    function approved() { DB::table('change')->delete(); foreach (Registry::$records as $record) { $record->pending = false; $record->storeApproved(); } }
     $image = imagecreatetruecolor(2, 2);
     ob_start(); imagepng($image); $png = ob_get_clean();
     ob_start(); imagejpeg($image); $jpg = ob_get_clean();
@@ -214,7 +261,7 @@ namespace {
     check($handler->handle(request('PUT', ['tree' => 'test', 'xref' => 'M1', 'title' => 'Changed']))->getStatusCode() === 202, 'Update');
     $updated = DB::table('change')->value('new_gedcom');
     check(str_contains($updated, "\n2 TITL Changed\n1 NOTE Keep") && str_contains($updated, '1 _DATE 1900') && str_contains($updated, '1 RESN none'), 'Preserve metadata');
-    check($handler->handle(request('PUT', ['tree' => 'test', 'xref' => 'M1', 'title' => 'Again']))->getStatusCode() === 409, 'Pending conflict');
+    check($handler->handle(request('PUT', ['tree' => 'test', 'xref' => 'M1', 'title' => 'Again']))->getStatusCode() === 202, 'Subsequent pending media edit queues');
     approved(); CheckAccess::$write = false;
     check($handler->handle(request('DELETE', ['tree' => 'test', 'xref' => 'M1']))->getStatusCode() === 403, 'Write access');
     CheckAccess::$write = true; $record->private = true;
@@ -228,8 +275,9 @@ namespace {
     approved();
     check($handler->handle($json->withQueryParams(['tree' => 'other']))->getStatusCode() === 400, 'Conflicting query/body rejected');
     $record->pending = true;
-    check($handler->handle(request('PUT', ['tree' => 'test', 'xref' => 'M1', 'title' => 'x']))->getStatusCode() === 409, 'Pending record rejected');
-    $record->pending = false;
+    DB::table('change')->insert(['gedcom_id' => 1, 'xref' => 'M1', 'status' => 'pending', 'new_gedcom' => $record->gedcom()]);
+    check($handler->handle(request('PUT', ['tree' => 'test', 'xref' => 'M1', 'title' => 'x']))->getStatusCode() === 202, 'Pending record remains editable');
+    approved();
     $read = request('GET', ['tree' => 'test', 'xref' => 'M1', 'filename' => 'photo.png'], 'api_read_privacy');
     $response = $handler->execute($read, 'download-media');
     check($response->getStatusCode() === 200 && (string) $response->getBody() === $png, 'Download');
@@ -245,6 +293,7 @@ namespace {
     CheckAccess::$privacy = false;
     check($handler->execute($read, 'download-media')->getStatusCode() === 403, 'Tree privacy');
     CheckAccess::$privacy = true;
+    approved(); Registry::$records['I1'] = new GedcomRecord('I1', '0 @I1@ INDI', $tree);
     $linkInput = ['tree' => 'test', 'xref' => 'M1', 'target-xref' => 'I1', 'target-type' => 'INDI'];
     check($handler->execute(request('POST', $linkInput), 'link-media')->getStatusCode() === 202, 'Link');
     Registry::$records['I1']->data = DB::table('change')->where('xref', 'I1')->value('new_gedcom');
@@ -268,8 +317,10 @@ namespace {
         check($tool['name'] === $action && strlen($tool['description']) > 100, 'Tool description');
     }
     check(isset(MediaTools::openApiPaths()['/media']['post']['requestBody']['content']['multipart/form-data']), 'Swagger multipart');
+    approved(); $record->data = "0 @M1@ OBJE\n1 FILE photo.png\n2 FORM PNG";
     // Phase 1: signed capability URLs let a client view/download without base64.
     Registry::container(new class {
+        public function set(string $class, $value): void {}
         public function get(string $class): object { return new class { public function getPreference(string $name, $default = '') { return 'test-encryption-key'; } }; }
     });
     $capabilityRequest = request('GET', ['tree' => 'test', 'xref' => 'M1'], 'api_read_member')->withAttribute('base_url', 'https://example.test');
@@ -293,7 +344,7 @@ namespace {
     approved(); Registry::$records['I1'] = new GedcomRecord('I1', '0 @I1@ INDI', $tree);
     $spool = sys_get_temp_dir() . '/media-upload-test-' . bin2hex(random_bytes(6));
     $uploadToken = \Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaToken::sign([
-        'op' => 'upload', 'tree' => 'test', 'xref' => 'I1', 'type' => 'INDI', 'file' => 'staged.png',
+        'op' => 'upload', 'user-id' => 1, 'tree' => 'test', 'xref' => 'I1', 'type' => 'INDI', 'file' => 'staged.png',
         'title' => 'Staged', 'note' => '', 'date' => '', 'id' => bin2hex(random_bytes(16)),
     ], \Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaToken::moduleKey(), 600);
     $upload = new \Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaUpload($handler, new \Fisharebest\Webtrees\Services\TreeService($tree), $spool);
@@ -306,6 +357,13 @@ namespace {
     $replay = $upload->handle((new ServerRequest('PUT', ''))->withQueryParams(['token' => $uploadToken])
         ->withHeader('Content-Type', 'image/png')->withBody(\Nyholm\Psr7\Stream::create($png)));
     check($replay->getStatusCode() === 409, 'Signed upload URL is single-use');
+    $marker = (glob($spool . '/*') ?: [])[0];
+    touch($marker, time() - 400);
+    $claims = \Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaToken::verify($uploadToken, \Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaToken::moduleKey(), 'upload');
+    $claims['id'] = bin2hex(random_bytes(16));
+    $otherToken = \Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaToken::sign($claims, \Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\MediaToken::moduleKey(), 600);
+    check($upload->handle($put->withQueryParams(['token' => $otherToken])->withBody(\Nyholm\Psr7\Stream::create($png)))->getStatusCode() === 201, 'Another staged upload triggers marker cleanup');
+    check(file_exists($marker) && $upload->handle($put->withBody(\Nyholm\Psr7\Stream::create($png)))->getStatusCode() === 409, 'Single-use marker survives the full ten-minute upload token lifetime');
     $wrongPurpose = (new ServerRequest('PUT', ''))->withQueryParams(['token' => $tokenOf($photo['content-url'])])->withBody(\Nyholm\Psr7\Stream::create($png));
     check($upload->handle($wrongPurpose)->getStatusCode() === 403, 'Content token cannot authorize an upload');
     $oversized = (new ServerRequest('PUT', ''))->withQueryParams(['token' => $uploadToken])->withHeader('Content-Length', (string) (MediaInput::REST_LIMIT + 1))->withBody(\Nyholm\Psr7\Stream::create($png));
@@ -328,6 +386,7 @@ namespace {
     DB::table('media_file')->delete();
     Registry::container(null);
     require __DIR__ . '/media-chunk-handler.php';
+    require __DIR__ . '/issue-17-behavior.php';
     foreach ($fs->listContents('', true)->filter(fn ($i) => $i->isFile()) as $item) { $fs->delete($item->path()); }
     $fs->deleteDirectory('api-media'); rmdir($dir);
     echo "PASS: $checks checks (record/access doubles; real SQLite, PSR-7, Flysystem).\n";

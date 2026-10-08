@@ -34,6 +34,7 @@ namespace Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers;
 
 use Fig\Http\Message\StatusCodeInterface;
 use Fisharebest\Webtrees\GedcomRecord;
+use Fisharebest\Webtrees\DB;
 use Fisharebest\Webtrees\Header;
 use Fisharebest\Webtrees\Note;
 use Fisharebest\Webtrees\Registry;
@@ -44,6 +45,7 @@ use Jefferson49\Webtrees\Helpers\Authorization;
 use Jefferson49\Webtrees\Helpers\Functions;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\GedcomRecordMutation;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordSnapshot;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\PendingChangeDetails;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Parameter\Gedcom as GedcomParameter;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Parameter\Note as NoteParameter;
@@ -75,7 +77,7 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
 {
     private TreeService $tree_service;
 
-    public const string METHOD_DESCRIPTION = 'Modify the GEDCOM data of a record.';
+    public const string METHOD_DESCRIPTION = 'Modify a record. mode=replace replaces supplied facts; mode=merge adds fact blocks without removing existing data. dry-run reports all removed and added facts, including changed sub-tags.';
 
     public function __construct(TreeService $tree_service)
     {
@@ -121,6 +123,7 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
                 required: false,
                 schema: new OA\Schema(type: 'boolean', default: false),
             ),
+            new OA\Parameter(name: 'mode', in: 'query', description: 'replace replaces supplied facts; merge only adds distinct complete fact blocks.', required: false, schema: new OA\Schema(type: 'string', enum: ['replace', 'merge'], default: 'replace')),
             new OA\Parameter(
                 name: 'dry-run',
                 in: 'query',
@@ -130,6 +133,7 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
             ),
         ],
         responses: [
+            new OA\Response(response: '202', description: 'Record submitted; returns xref, hash, version and per-record receipts.'),
             new OA\Response(
                 response: '200',
                 description: 'Successfully modified record.',
@@ -202,6 +206,9 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
         $note      = Validator::queryParams($request)->string('note', '');
         $remove_protected_links = Validator::queryParams($request)->boolean('remove-protected-links', false);
         $dry_run = Validator::queryParams($request)->boolean('dry-run', false);
+
+        $mode = Validator::queryParams($request)->string('mode', 'replace');
+        if (!in_array($mode, ['replace', 'merge'], true)) return api_response('mode must be replace or merge.', 400);
 
         // Adopt line breaks for GEDCOM text
         $gedcom    = str_replace(["\r\n", '\n', "%OA"], ["\n", "\n", "\n"], $gedcom);
@@ -291,6 +298,10 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
         $modified_gedcom = preg_replace('/[\r\n]+/', "\n", $modified_gedcom);
         $modified_gedcom = trim($modified_gedcom);
 
+        if ($mode === 'merge') {
+            $modified_gedcom = GedcomRecordMutation::mergeFacts($record->gedcom(), $modified_gedcom);
+        }
+
         $removed_links = self::removedProtectedLinks($record->gedcom(), $modified_gedcom);
         $preserved_links = [];
 
@@ -304,6 +315,9 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
         if ($dry_run) {
             return api_response([
                 'dry-run' => true,
+                'mode' => $mode,
+                'removed-facts' => GedcomRecordMutation::removedFacts($record->gedcom(), $modified_gedcom),
+                'added-facts' => GedcomRecordMutation::removedFacts($modified_gedcom, $record->gedcom()),
                 'xref' => $record->xref(),
                 'old-gedcom' => trim($record->gedcom()),
                 'new-gedcom' => $modified_gedcom,
@@ -312,27 +326,29 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
             ], StatusCodeInterface::STATUS_OK);
         }
 
-        $pending_changes = array_map(
-            static fn (object $row): array => PendingChangeDetails::serialize($row),
-            PendingChangeDetails::rows($tree, $record->xref()),
-        );
-        if ($pending_changes !== []) {
-            return api_response([
-                'error' => 'pending_conflict',
+        return DB::connection()->transaction(function () use ($tree, $record, $mode, $modified_gedcom, $preserved_links, $removed_links): ResponseInterface {
+            DB::table('gedcom')->where('gedcom_id', $tree->id())->lockForUpdate()->first();
+            $snapshot = RecordSnapshot::read($record);
+            $rows = $snapshot['pending'];
+            if (!$snapshot['current'] || ($rows !== [] && $mode !== 'merge')) {
+                return api_response([
+                    'error' => 'pending_conflict',
+                    'xref' => $record->xref(),
+                    'pending-changes' => array_map(static fn (object $row): array => PendingChangeDetails::serialize($row), $rows),
+                    'message' => 'Reload the current record. Replace requires review of pending changes; merge requires the current approved or pending snapshot.',
+                ], StatusCodeInterface::STATUS_CONFLICT);
+            }
+            if ($mode === 'merge' && $modified_gedcom === $record->gedcom()) {
+                return api_response(RecordVersion::receipt($tree, ['xref' => $record->xref(), 'changed' => false], [$record]), 200);
+            }
+            $record->updateRecord($modified_gedcom, false);
+            return api_response(RecordVersion::receipt($tree, [
                 'xref' => $record->xref(),
-                'pending-changes' => $pending_changes,
-                'message' => 'The record has pending changes. Review or cancel the listed change before submitting another write.',
-            ], StatusCodeInterface::STATUS_CONFLICT);
-        }
-
-        $record->updateRecord($modified_gedcom, false);
-
-        return api_response(array_merge([
-            'xref' => $record->xref(),
-            'pending' => true,
-            'preserved-links' => $preserved_links,
-            'removed-links' => $removed_links,
-        ], RecordVersion::fromGedcom($modified_gedcom)), StatusCodeInterface::STATUS_ACCEPTED);
+                'pending' => true,
+                'preserved-links' => $preserved_links,
+                'removed-links' => $removed_links,
+            ], [$record]), StatusCodeInterface::STATUS_ACCEPTED);
+        });
     }
 
     /**
@@ -369,6 +385,7 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
                         McpSchema::PREPEND
                     ),
                     'note' => McpSchema::NOTE,
+                    'mode' => ['type' => 'string', 'enum' => ['replace', 'merge'], 'default' => 'replace', 'description' => 'merge appends new fact blocks and preserves all existing facts; it does not replace a fact of the same tag.'],
                     'remove-protected-links' => [
                         'type' => 'boolean',
                         'description' => 'Explicitly allow removal of existing FAMS, FAMC, OBJE or CHIL links. Defaults to false.',
@@ -397,6 +414,8 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
                         'description' => 'Protected links still missing after the write (only when remove-protected-links=true).',
                         'items' => ['type' => 'string'],
                     ],
+                    'removed-facts' => ['type' => 'array', 'items' => ['type' => 'string']],
+                    'added-facts' => ['type' => 'array', 'items' => ['type' => 'string']],
                     'version' => ['type' => 'string'],
                     'hash' => ['type' => 'string'],
                 ],

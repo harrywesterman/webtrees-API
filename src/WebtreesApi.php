@@ -95,6 +95,8 @@ use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\GetCitations;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\VerifyWrite;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\SearchStructured;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\AddFamily;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\CreateRecords;
+use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\CancelledXrefs;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UploadMediaStatus;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UnlinkChild;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\UnlinkSpouse;
@@ -218,6 +220,8 @@ class WebtreesApi extends AbstractModule implements
     public const string PATH_GET_CITATIONS         = 'get-citations';
     public const string PATH_VERIFY_WRITE           = 'verify-write';
     public const string PATH_SEARCH_STRUCTURED      = 'search-structured';
+    public const string PATH_CREATE_RECORDS = 'create-records';
+    public const string PATH_CANCELLED_XREFS = 'cancelled-xrefs';
     public const string PATH_ADD_FAMILY              = 'add-family';
     public const string PATH_UPLOAD_MEDIA_STATUS    = 'upload-media-status';
     public const string PATH_MEDIA_CONTENT          = 'media/content';
@@ -320,6 +324,8 @@ class WebtreesApi extends AbstractModule implements
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_GET_CITATIONS, GetCitations::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_VERIFY_WRITE, VerifyWrite::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_SEARCH_STRUCTURED, SearchStructured::class, null, $api_middleware);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_CREATE_RECORDS, CreateRecords::class, null, $api_middleware);
+        Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_CANCELLED_XREFS, CancelledXrefs::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_FAMILY, AddFamily::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_UPLOAD_MEDIA_STATUS, UploadMediaStatus::class, null, $api_middleware);
         Functions::registerRoute(self::ROUTE_API . '/' . self::PATH_ADD_CHILD_TO_FAMILY, AddChildToFamily::class, null, $api_middleware);

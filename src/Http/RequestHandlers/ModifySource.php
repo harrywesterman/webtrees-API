@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers;
 
+use DomainException;
 use Fig\Http\Message\StatusCodeInterface;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
 use Fisharebest\Webtrees\Services\TreeService;
 use Fisharebest\Webtrees\Validator;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\PendingChangeDetails;
@@ -22,18 +24,23 @@ final class ModifySource implements WebtreesMcpToolRequestHandlerInterface
     public function __construct(private TreeService $tree_service) {}
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
-        $tree = SourceContext::tree($this->tree_service, $request);
-        if ($tree instanceof ResponseInterface) return $tree;
-        $source = SourceContext::record($tree, Validator::queryParams($request)->string('xref', ''), true);
-        if ($source instanceof ResponseInterface) return $source;
-        if ($source->tag() !== 'SOUR') return api_response('XREF must identify a SOUR record.', 400);
-        $write = CheckAccess::checkUserWriteAccess($tree);
-        if ($write->getStatusCode() !== 200) return $write;
-        if (PendingChangeDetails::rows($tree, $source->xref()) !== []) return api_response(['error' => 'pending_conflict', 'xref' => $source->xref()], 409);
-        $result = SourceRecords::modify($source->gedcom(), $request->getQueryParams());
-        if (!$result['changed']) return api_response(['xref' => $source->xref(), 'changed' => false], 200);
-        $source->updateRecord($result['gedcom'], true);
-        return api_response(['xref' => $source->xref(), 'pending' => true], 202);
+        try {
+            $tree = SourceContext::tree($this->tree_service, $request);
+            if ($tree instanceof ResponseInterface) return $tree;
+            $source = SourceContext::record($tree, Validator::queryParams($request)->string('xref', ''), true);
+            if ($source instanceof ResponseInterface) return $source;
+            if ($source->tag() !== 'SOUR') return api_response('XREF must identify a SOUR record.', 400);
+            $write = CheckAccess::checkUserWriteAccess($tree);
+            if ($write->getStatusCode() !== 200) return $write;
+            if (PendingChangeDetails::rows($tree, $source->xref()) !== []) return api_response(['error' => 'pending_conflict', 'xref' => $source->xref()], 409);
+            $result = SourceRecords::modify($source->gedcom(), $request->getQueryParams());
+            if (!$result['changed']) return api_response(RecordVersion::receipt($tree, ['xref' => $source->xref(), 'changed' => false], [$source]), 200);
+            $source->updateRecord($result['gedcom'], true);
+            return api_response(RecordVersion::receipt($tree, ['xref' => $source->xref(), 'pending' => true], [$source]), 202);
+        } catch (DomainException $e) {
+            $status = in_array($e->getCode(), [400, 403, 404, 409], true) ? $e->getCode() : 400;
+            return api_response($e->getMessage(), $status);
+        }
     }
     public static function getMcpToolDescription(): array
     {

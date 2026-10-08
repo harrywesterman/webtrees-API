@@ -7,6 +7,11 @@ $root = getenv('WEBTREES_TEST_ROOT');
 if (!$root) { throw new RuntimeException('Set WEBTREES_TEST_ROOT to an unpacked webtrees release.'); }
 require $root . '/vendor/autoload.php';
 require __DIR__ . '/../autoload.php';
+$common = new Composer\Autoload\ClassLoader();
+foreach (['Helpers', 'Authorization', 'Module', 'Exceptions', 'Log'] as $ns) {
+    $common->addPsr4('Jefferson49\\Webtrees\\' . $ns . '\\', __DIR__ . '/../vendor/jefferson49/webtrees-common/' . $ns);
+}
+$common->register(true);
 
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\Media;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\MediaDownload;
@@ -86,6 +91,18 @@ foreach (MediaTools::ACTIONS as $action) {
     check(count(array_filter($tools, fn ($tool) => $tool['name'] === $action)) === 1, 'Actual tools/list discovers ' . $action);
 }
 check(count(array_filter($tools, fn ($tool) => $tool['name'] === 'create-media-upload')) === 1, 'Actual tools/list discovers create-media-upload');
+foreach (['create-records', 'cancelled-xrefs'] as $name) {
+    check(count(array_filter($tools, fn ($tool) => $tool['name'] === $name)) === 1, 'Actual tools/list discovers ' . $name);
+}
+check(in_array('create-records', McpToolPermission::$mcp_write_tools, true) && !in_array('create-records', McpToolPermission::$mcp_read_tools, true), 'create-records requires write scope');
+check(in_array('add-family', McpToolPermission::$mcp_write_tools, true) && !in_array('add-family', McpToolPermission::$mcp_read_tools, true), 'add-family requires write scope');
+foreach ($tools as $tool) {
+    if ($tool['name'] === 'add-unlinked-record') check(isset($tool['outputSchema']['properties']['hash'], $tool['outputSchema']['properties']['records']), 'Write discovery exposes verification receipts');
+    if ($tool['name'] === 'upload-media') check(!in_array('content-base64', $tool['inputSchema']['required'], true), 'Native upload schema does not require base64');
+    if ($tool['name'] === 'upload-media-batch') check(!in_array('content-base64', $tool['inputSchema']['properties']['files']['items']['required'], true), 'Native batch schema does not require base64');
+}
+check(in_array(Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\CreateRecords::class, ApiPermission::API_WRITE_HANDLERS, true), 'REST create-records is authorized as a write');
+check(in_array(Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\CancelledXrefs::class, ApiPermission::API_READ_HANDLERS, true), 'REST cancelled-xrefs is authorized as a read');
 $factory = new Nyholm\Psr7\Factory\Psr17Factory();
 Registry::responseFactory(new Fisharebest\Webtrees\Factories\ResponseFactory($factory, $factory));
 $protocolClass->getProperty('stream_factory')->setValue(null, $factory);
@@ -109,7 +126,7 @@ foreach (MediaTools::ACTIONS as $action) {
     if ($action === 'upload-media-chunk') { continue; } // Stateful dispatch exercised separately.
     $request = (new ServerRequest('GET', ''))->withAttribute('oauth_scopes', ['mcp_write'])
         ->withAttribute('mcp_tool_interface', WebtreesMcpToolRequestHandlerInterface::class)
-        ->withParsedBody(['id' => 1, 'name' => $action, 'arguments' => ['tree' => 'test', 'xref' => 'M1']]);
+        ->withParsedBody(['id' => 1, 'name' => $action, 'arguments' => ['tree' => 'test', 'xref' => 'M1', 'legacy-inline' => true, 'content-base64' => 'YQ==']]);
     $result = json_decode((string) $dispatcher->handle($request)->getBody(), true);
     check(($result['result']['isError'] ?? true) === false, '202 is MCP success ' . $action);
     check(($result['result']['structuredContent']['action'] ?? '') === $action && $result['result']['structuredContent']['mcp'] === true, 'Dispatch ' . $action);
@@ -223,7 +240,7 @@ $rpc413 = json_decode((string) Jefferson49\Webtrees\Module\WebtreesApi\Http\Midd
         'requiredScope' => 'api_write',
     ])),
 ), true, 512, JSON_THROW_ON_ERROR);
-check(($rpc413['result']['isError'] ?? false) === true && ($rpc413['result']['structuredContent']['maxInlineBytes'] ?? 0) === 512 * 1024, 'JSON-RPC 413 handoff');
+check(($rpc413['result']['isError'] ?? false) === true && !isset($rpc413['result']['structuredContent']) && str_contains($rpc413['result']['content'][0]['text'], '"maxInlineBytes":524288'), 'JSON-RPC 413 handoff');
 $json = json_decode(file_get_contents(__DIR__ . '/../resources/OpenApi/OpenApi.json'), true, 512, JSON_THROW_ON_ERROR);
 foreach (MediaTools::openApiPaths() as $path => $schema) { check(($json['paths'][$path] ?? null) === $schema, 'Generated OpenAPI matches ' . $path); }
 echo "PASS: $checks real-webtrees API/transport/schema contracts.\n";

@@ -44,10 +44,19 @@ use OpenApi\Attributes as OA;
 #[OA\Schema(
     title: 'XREF item',
     description: 'A GEDCOM XREF (cross-reference identifier)',
-    additionalProperties: false,
+    additionalProperties: true,
 )]
 class XrefItem
 {
+    #[OA\Property(description: 'SHA-256 of the resulting primary record GEDCOM.')]
+    public ?string $hash = null;
+
+    #[OA\Property(description: 'Alias of hash; pass to verify-write.')]
+    public ?string $version = null;
+
+    #[OA\Property(type: 'array', items: new OA\Items(type: 'object'), description: 'Per-record xref, hash, version and state for every affected record.')]
+    public array $records = [];
+
     public function __construct(string $xref) {
         $this->xref = $xref;
     }

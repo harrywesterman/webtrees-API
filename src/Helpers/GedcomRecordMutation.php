@@ -8,6 +8,40 @@ final class GedcomRecordMutation
 {
     private const array PROTECTED_TAGS = ['FAMS', 'FAMC', 'OBJE', 'CHIL'];
 
+    /** Level-one fact blocks, including every subordinate line. */
+    public static function facts(string $gedcom): array
+    {
+        preg_match_all('/^1 [^\n]*(?:\n(?:[2-9]|[1-9][0-9]+) [^\n]*)*/m', str_replace(["\r\n", "\r"], "\n", trim($gedcom)), $matches);
+        return $matches[0];
+    }
+
+    /** Multiset diff: repeated identical facts are counted individually. */
+    public static function removedFacts(string $before, string $after): array
+    {
+        $remaining = self::facts($after);
+        $removed = [];
+        foreach (self::facts($before) as $fact) {
+            $index = array_search($fact, $remaining, true);
+            if ($index === false) $removed[] = $fact;
+            else unset($remaining[$index]);
+        }
+        return $removed;
+    }
+
+    /** Add supplied fact blocks without replacing any existing fact or sub-tag. */
+    public static function mergeFacts(string $before, string $fragment): string
+    {
+        $result = trim($before);
+        $existing = self::facts($before);
+        foreach (self::facts($fragment) as $fact) {
+            if (!in_array($fact, $existing, true)) {
+                $result .= "\n" . $fact;
+                $existing[] = $fact;
+            }
+        }
+        return $result;
+    }
+
     /**
      * Preserve protected level-one structures missing from the submitted record.
      * The returned list contains the level-one link lines that were re-added.

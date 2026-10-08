@@ -38,7 +38,12 @@ export class Bridge {
     let payload;
     try { payload = await response.json(); } catch { throw new Error('Invalid MCP response. Inspect webtrees before retrying an upload.'); }
     if (payload.jsonrpc !== '2.0' || payload.id !== id) throw new Error('Mismatched MCP response. Inspect webtrees before retrying an upload.');
-    if (payload.error) throw new Error(`Remote MCP error ${payload.error.code}. Inspect server configuration.`);
+    if (payload.error) {
+      const error = new Error(`Remote MCP error ${payload.error.code}: ${payload.error.message ?? 'request failed'}`);
+      error.code = payload.error.code;
+      error.data = payload.error.data;
+      throw error;
+    }
     return payload.result;
   }
   async list() {
@@ -51,13 +56,14 @@ export class Bridge {
       }
       if (t.name === 'upload-media-batch') {
         const properties = { ...t.inputSchema.properties };
-        properties.files = { type: 'array', minItems: 1, maxItems: 50, description: 'Local image files. Each item must contain local-path and may contain title, note, or date.' };
-        return { ...t, description: 'Upload multiple local images through MCP and link them to one verified target in one pending change. Supply local-path for each file; never base64.',
-          inputSchema: { type: 'object', properties, required: ['tree', 'target-xref', 'target-type', 'files'], additionalProperties: false } };
+        delete properties['legacy-inline'];
+        properties.files = { type: 'array', minItems: 1, maxItems: 50, items: { type: 'object', properties: { 'local-path': { type: 'string' }, 'target-xref': { type: 'string' }, 'target-type': { type: 'string', enum: ['INDI', 'FAM', 'SOUR'] }, title: { type: 'string' }, note: { type: 'string' }, date: { type: 'string' } }, required: ['local-path'], additionalProperties: false }, description: 'Local files with optional per-file target, title, note and date.' };
+        return { ...t, description: 'Upload multiple local images/PDFs using signed URLs, with optional per-file targets. PUTs commit independently and edits queue against pending versions. Supply local-path for each file; never base64.',
+          inputSchema: { type: 'object', properties, required: ['tree', 'files'], additionalProperties: false } };
       }
       if (t.name !== 'upload-media') return t;
       const properties = { ...t.inputSchema.properties };
-      delete properties['content-base64']; delete properties.filename;
+      delete properties['content-base64']; delete properties['legacy-inline']; delete properties.filename;
       properties['local-path'] = { type: 'string', description: 'Absolute path to a local JPEG/PNG/GIF/WebP/PDF file within WEBTREES_UPLOAD_ROOTS. Up to 20 MiB. The bridge reads and transfers bytes automatically over MCP.' };
       return { ...t, description: 'Upload a local image through MCP and link to a verified INDI/FAM/SOUR. Supply local-path, never base64. Requires mcp_write, no api_write. Verify tree and target first. BOTH media and link await approval. Do not retry uncertain uploads.',
         inputSchema: { type: 'object', properties, required: ['tree', 'target-xref', 'target-type', 'local-path'], additionalProperties: false } };
@@ -94,6 +100,9 @@ export class Bridge {
       try { receipt = JSON.parse(staged.content.find(c => c.type === 'text').text); }
       catch { throw new Error('Invalid staged-upload response.'); }
     }
+    return this.putUpload(receipt, bytes, args, path);
+  }
+  async putUpload(receipt, bytes, args, path) {
     if (typeof receipt['upload-url'] !== 'string' || !receipt['upload-url'] || !Number.isInteger(receipt['max-bytes']) || bytes.length > receipt['max-bytes']) {
       throw new Error('Server refused a staged upload URL for this file.');
     }
@@ -179,18 +188,39 @@ export class Bridge {
     return { ...result, structuredContent: local, content: [{ type: 'text', text: JSON.stringify(local) }] };
   }
   async uploadBatch(args) {
-    if (!Array.isArray(args.files) || args.files.length < 1 || args.files.length > 50) throw new Error('files must contain between 1 and 50 local image files.');
-    const files = [];
+    if (!Array.isArray(args.files) || args.files.length < 1 || args.files.length > 50) throw new Error('files must contain 1-50 local files.');
+    const prepared = [];
     let total = 0;
     for (const item of args.files) {
-      if (!item || typeof item['local-path'] !== 'string') throw new Error('Each batch file needs an absolute local-path.');
       const bytes = await this.readLocal(item['local-path']);
       total += bytes.length;
-      if (total > LIMIT) throw new Error('The batch exceeds the 20 MiB total limit.');
-      files.push({ filename: basename(await realpath(item['local-path'])), 'content-base64': bytes.toString('base64'), ...Object.fromEntries(['title', 'note', 'date'].filter(k => item[k] !== undefined).map(k => [k, item[k]])) });
+      if (total > LIMIT) throw new Error('Batch exceeds the 20 MiB total limit.');
+      const path = await realpath(item['local-path']);
+      const metadata = { ...Object.fromEntries(['target-xref', 'target-type', 'title', 'note', 'date'].filter(k => item[k] !== undefined).map(k => [k, item[k]])), filename: basename(path) };
+      prepared.push({ bytes, path, metadata });
     }
-    return this.rpc('tools/call', { name: 'upload-media-batch', arguments: { ...args, files } });
+    const staged = await this.rpc('tools/call', { name: 'upload-media-batch', arguments: {
+      ...Object.fromEntries(['tree', 'target-xref', 'target-type'].filter(k => args[k] !== undefined).map(k => [k, args[k]])),
+      files: prepared.map(item => item.metadata),
+    } });
+    if (staged.isError) return staged;
+    const receipt = staged.structuredContent ?? JSON.parse(staged.content.find(c => c.type === 'text').text);
+    if (!Array.isArray(receipt.files) || receipt.files.length !== prepared.length) throw new Error('Invalid staged batch receipt; no file bytes were sent.');
+    const files = [];
+    for (let index = 0; index < prepared.length; index++) {
+      const item = prepared[index];
+      try {
+        const result = await this.putUpload(receipt.files[index], item.bytes, { ...args, ...item.metadata }, item.path);
+        files.push(result.structuredContent);
+      } catch (error) {
+        throw new Error(`Batch stopped at file ${index + 1}. Previously completed media xrefs: ${files.map(file => file.xref).join(', ') || 'none'}. Inspect webtrees before retrying. ${error.message}`);
+      }
+    }
+    const records = [...new Map(files.flatMap(file => file.records ?? []).map(record => [record.xref, record])).values()];
+    const payload = { xref: files[0].xref, hash: files[0].hash, version: files[0].version, files, records, pending: true };
+    return { isError: false, content: [{ type: 'text', text: JSON.stringify(payload) }], structuredContent: payload };
   }
+
   async handle(request) {
     switch (request.method) {
       case 'initialize': return { protocolVersion: request.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'webtrees-local-file-bridge', version: '1.0.0' } };

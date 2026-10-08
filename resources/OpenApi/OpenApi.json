@@ -98,7 +98,7 @@
                                     "file": {
                                         "type": "string",
                                         "format": "binary",
-                                        "description": "JPEG/PNG/GIF/WebP, up to 20 MiB and 40 megapixels; also subject to PHP limits."
+                                        "description": "JPEG/PNG/GIF/WebP/PDF, up to 20 MiB and 40 megapixels; also subject to PHP limits."
                                     }
                                 },
                                 "required": [
@@ -182,7 +182,7 @@
             "put": {
                 "operationId": "update-media",
                 "summary": "update-media",
-                "description": "Submit a media metadata change. Omitted fields remain unchanged; empty fields clear one value. Multiple titles/files or notes may require editing in webtrees. Await moderator approval before another write.",
+                "description": "Submit a media metadata change. Omitted fields remain unchanged; empty fields clear one value. Multiple titles/files or notes may require editing in webtrees. Further edits queue against the latest pending version; concurrent stale writes return 409 with change-id and xref.",
                 "tags": [
                     "webtrees"
                 ],
@@ -336,7 +336,7 @@
             "post": {
                 "operationId": "link-media",
                 "summary": "link-media",
-                "description": "Link approved media to an existing verified person, family or source at record level. An existing link is a no-op only when both records have no pending changes. Pending records return 409 even for a repeated link; await moderator approval.",
+                "description": "Link approved media to an existing verified person, family or source at record level. An existing link is a no-op. Links queue against the latest pending version; stale concurrent writes return 409 with change-id and xref.",
                 "tags": [
                     "webtrees"
                 ],
@@ -2316,7 +2316,7 @@
                 "tags": [
                     "webtrees"
                 ],
-                "description": "Cancel pending changes for a record before moderator approval.",
+                "description": "Cancel pending changes for a record before moderator approval. Cancelling a creation retains a rejected change-history row, readable by managers with cancelled-xrefs. Xrefs are not reused automatically; gaps must not be interpreted as missing records.",
                 "operationId": "cancel-pending",
                 "parameters": [
                     {
@@ -2421,7 +2421,7 @@
                 "tags": [
                     "webtrees"
                 ],
-                "description": "Modify the GEDCOM data of a record.",
+                "description": "Modify a record. mode=replace replaces supplied facts; mode=merge adds fact blocks without removing existing data. dry-run reports all removed and added facts, including changed sub-tags.",
                 "operationId": "ec3bac6a7078a152213ee17af9b71bdd",
                 "parameters": [
                     {
@@ -2447,9 +2447,46 @@
                     },
                     {
                         "$ref": "#/components/parameters/note"
+                    },
+                    {
+                        "name": "remove-protected-links",
+                        "in": "query",
+                        "description": "Explicitly allow removal of existing FAMS, FAMC, OBJE or CHIL links. Defaults to false.",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": false
+                        }
+                    },
+                    {
+                        "name": "mode",
+                        "in": "query",
+                        "description": "replace replaces supplied facts; merge only adds distinct complete fact blocks.",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "replace",
+                            "enum": [
+                                "replace",
+                                "merge"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "dry-run",
+                        "in": "query",
+                        "description": "Preview the resulting GEDCOM without creating a pending change.",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "default": false
+                        }
                     }
                 ],
                 "responses": {
+                    "202": {
+                        "description": "Record submitted; returns xref, hash, version and per-record receipts."
+                    },
                     "200": {
                         "description": "Successfully modified record.",
                         "content": {
@@ -2905,6 +2942,131 @@
                     }
                 }
             }
+        },
+        "/cancelled-xrefs": {
+            "get": {
+                "tags": [
+                    "webtrees"
+                ],
+                "description": "List rejected creation xrefs from retained change history. Requires manager rights and member read scope.",
+                "operationId": "46ebac3cc9b0ee2fb9ed119680087394",
+                "parameters": [
+                    {
+                        "name": "tree",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "schema": {
+                            "type": "integer",
+                            "default": 100,
+                            "maximum": 500,
+                            "minimum": 1
+                        }
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "schema": {
+                            "type": "integer",
+                            "default": 0,
+                            "minimum": 0
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Cancelled XREFs, next-offset and history-complete=false"
+                    },
+                    "403": {
+                        "description": "Manager/member access required"
+                    },
+                    "500": {
+                        "description": "History read failed"
+                    }
+                }
+            }
+        },
+        "/create-records": {
+            "post": {
+                "tags": [
+                    "webtrees"
+                ],
+                "description": "Create linked GEDCOM records atomically. Local IDs in pointers resolve to allocated XREFs; include reciprocal family links explicitly.",
+                "operationId": "846aae12ec29f76198156c920e559de0",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "tree",
+                                    "idempotency-key",
+                                    "records"
+                                ],
+                                "properties": {
+                                    "tree": {
+                                        "type": "string"
+                                    },
+                                    "idempotency-key": {
+                                        "type": "string"
+                                    },
+                                    "records": {
+                                        "type": "array",
+                                        "items": {
+                                            "required": [
+                                                "id",
+                                                "record-type",
+                                                "gedcom"
+                                            ],
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string"
+                                                },
+                                                "record-type": {
+                                                    "type": "string"
+                                                },
+                                                "gedcom": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "type": "object"
+                                        },
+                                        "maxItems": 100,
+                                        "minItems": 1
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "202": {
+                        "description": "All records submitted; returns xrefs, hashes and per-record receipts."
+                    },
+                    "200": {
+                        "description": "Idempotent replay"
+                    },
+                    "400": {
+                        "description": "Invalid batch"
+                    },
+                    "403": {
+                        "description": "Access denied"
+                    },
+                    "409": {
+                        "description": "Idempotency conflict"
+                    },
+                    "500": {
+                        "description": "Transaction failed and rolled back"
+                    }
+                }
+            }
         }
     },
     "components": {
@@ -3174,12 +3336,33 @@
                 "title": "XREF item",
                 "description": "A GEDCOM XREF (cross-reference identifier)",
                 "properties": {
+                    "hash": {
+                        "description": "SHA-256 of the resulting primary record GEDCOM.",
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "version": {
+                        "description": "Alias of hash; pass to verify-write.",
+                        "type": [
+                            "string",
+                            "null"
+                        ]
+                    },
+                    "records": {
+                        "description": "Per-record xref, hash, version and state for every affected record.",
+                        "type": "array",
+                        "items": {
+                            "type": "object"
+                        }
+                    },
                     "xref": {
                         "$ref": "#/components/schemas/Xref"
                     }
                 },
                 "type": "object",
-                "additionalProperties": false
+                "additionalProperties": true
             }
         },
         "responses": {

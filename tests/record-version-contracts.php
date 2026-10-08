@@ -20,7 +20,7 @@ $modify = file_get_contents(__DIR__ . '/../src/Http/RequestHandlers/ModifyRecord
 $delete = file_get_contents(__DIR__ . '/../src/Http/RequestHandlers/DeleteRecord.php');
 $verify = file_get_contents(__DIR__ . '/../src/Http/RequestHandlers/VerifyWrite.php');
 check(str_contains($modify, "'pending' => true"), 'Modify receipt identifies pending state');
-check(str_contains($modify, 'RecordVersion::fromGedcom'), 'Modify receipt includes record hash');
+check(str_contains($modify, 'RecordVersion::receipt'), 'Modify receipt includes record hash');
 check(str_contains($delete, "'state' => 'pending_delete'"), 'Delete receipt identifies pending deletion');
 check(str_contains($verify, "'state' => 'applied'"), 'Verify-write reports applied state');
 check(str_contains($verify, "'state' => 'deleted'"), 'Verify-write reports deleted state');

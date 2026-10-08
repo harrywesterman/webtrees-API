@@ -60,6 +60,7 @@ use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
 use Throwable;
 
 use function Jefferson49\Webtrees\Module\WebtreesApi\Helpers\api_response;
@@ -252,7 +253,7 @@ class AddSpouseToFamily implements WebtreesMcpToolRequestHandlerInterface
         // Link the spouse to the family
         $family->createFact('1 ' . $link . ' @' . $spouse->xref() . '@', false);
 
-        return api_response(new XrefItem($spouse->xref()), StatusCodeInterface::STATUS_CREATED);
+        return api_response(RecordVersion::receipt($tree, ['xref' => $spouse->xref()], [$spouse , $family]), StatusCodeInterface::STATUS_CREATED);
     }
 
 	/**

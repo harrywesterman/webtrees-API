@@ -23,7 +23,7 @@ use function Jefferson49\Webtrees\Module\WebtreesApi\Helpers\api_response;
 
 final class CancelPending implements WebtreesMcpToolRequestHandlerInterface
 {
-    public const string METHOD_DESCRIPTION = 'Cancel pending changes for a record before moderator approval. Cancelling a creation does not reuse or tombstone its xref, so gaps in the xref sequence are expected and should not be treated as missing records.';
+    public const string METHOD_DESCRIPTION = 'Cancel pending changes for a record before moderator approval. Cancelling a creation retains a rejected change-history row, readable by managers with cancelled-xrefs. Xrefs are not reused automatically; gaps must not be interpreted as missing records.';
 
     public function __construct(private TreeService $tree_service, private PendingChangesService $pending_changes_service) {}
 
@@ -54,7 +54,8 @@ final class CancelPending implements WebtreesMcpToolRequestHandlerInterface
                 $this->pending_changes_service->rejectChange($record, $change_id);
             }
 
-            return api_response(['tree' => $tree_name, 'xref' => $xref, 'cancelled' => count($pending), 'change-id' => $change_id], StatusCodeInterface::STATUS_OK);
+            Registry::cache()->array()->clear();
+            return api_response(\Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion::receipt($tree, ['tree' => $tree_name, 'xref' => $xref, 'cancelled' => count($pending), 'change-id' => $change_id], [$xref]), StatusCodeInterface::STATUS_OK);
         } catch (Throwable $th) {
             return api_response($th->getMessage(), StatusCodeInterface::STATUS_INTERNAL_SERVER_ERROR);
         }

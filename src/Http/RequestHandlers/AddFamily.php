@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers;
 
 use Fisharebest\Webtrees\DB;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
 use Fisharebest\Webtrees\Individual;
 use Fisharebest\Webtrees\Services\TreeService;
 use Fisharebest\Webtrees\Validator;
@@ -36,7 +37,7 @@ final class AddFamily implements WebtreesMcpToolRequestHandlerInterface
             $existing = DB::table('families')->where('f_file', $tree->id())->where('f_gedcom', 'like', '%' . $marker . '%')->get(['f_id']);
             if ($existing->isNotEmpty()) {
                 $family = $existing->first();
-                return api_response(['idempotent' => true, 'family-xref' => $family->f_id, 'record-xrefs' => [$family->f_id]], 200);
+                return api_response(RecordVersion::receipt($tree, ['idempotent' => true, 'family-xref' => $family->f_id, 'record-xrefs' => [$family->f_id]], [$family->f_id]), 200);
             }
             if (!array_key_exists('husband', $input) && !array_key_exists('wife', $input) && empty($input['children'])) return api_response('At least one spouse or child is required.', 400);
             $result = DB::connection()->transaction(function () use ($tree, $input, $marker): array {
@@ -56,7 +57,7 @@ final class AddFamily implements WebtreesMcpToolRequestHandlerInterface
                 $family = $tree->createRecord($familyGedcom);
                 foreach ($spouses as [$tag, $participant]) $this->link($participant['record'], 'FAMS', $family->xref());
                 foreach ($children as $participant) $this->link($participant['record'], 'FAMC', $family->xref());
-                return ['family-xref' => $family->xref(), 'record-xrefs' => array_values(array_unique(array_merge(array_map(static fn (array $v): string => $v[1]['xref'], $spouses), array_map(static fn (array $v): string => $v['xref'], $children))))];
+                return RecordVersion::receipt($tree, ['family-xref' => $family->xref(), 'record-xrefs' => array_values(array_unique([$family->xref(), ...array_map(static fn (array $v): string => $v[1]['xref'], $spouses), ...array_map(static fn (array $v): string => $v['xref'], $children)]))], [$family, ...array_map(static fn (array $v) => $v[1]['record'], $spouses), ...array_map(static fn (array $v) => $v['record'], $children)]);
             });
             return api_response($result + ['idempotent' => false, 'pending' => true], 202);
         } catch (\Throwable $exception) {
@@ -76,7 +77,7 @@ final class AddFamily implements WebtreesMcpToolRequestHandlerInterface
         $gedcom = trim((string) ($value['gedcom'] ?? ''));
         if ($gedcom === '') $gedcom = '1 NAME ' . trim((string) ($value['name'] ?? ''));
         if (!str_contains($gedcom, '1 NAME ') && ($value['name'] ?? '') !== '') $gedcom = "1 NAME {$value['name']}\n" . $gedcom;
-        $record = $tree->createRecord("0 @@ INDI\n{$gedcom}" . (($value['note'] ?? '') !== '' ? "\n1 NOTE {$value['note']}" : ''));
+        $record = $tree->createIndividual("0 @@ INDI\n{$gedcom}" . (($value['note'] ?? '') !== '' ? "\n1 NOTE {$value['note']}" : ''));
         return ['xref' => $record->xref(), 'record' => $record];
     }
 

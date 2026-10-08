@@ -29,6 +29,7 @@ use Jefferson49\Webtrees\Module\WebtreesApi\WebtreesApi;
 use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
 use Throwable;
 
 use function Jefferson49\Webtrees\Module\WebtreesApi\Helpers\api_response;
@@ -108,7 +109,7 @@ final class UnlinkChild implements WebtreesMcpToolRequestHandlerInterface
         $removed += RelationshipLinks::removeFactsTo($family, ['CHIL'], $individual);
         if ($removed === 0) return api_response('Child link not found', StatusCodeInterface::STATUS_NOT_FOUND);
 
-        return api_response(new XrefItem($individual->xref()), StatusCodeInterface::STATUS_OK);
+        return api_response(RecordVersion::receipt($tree, ['xref' => $individual->xref()], [$individual , $family]), StatusCodeInterface::STATUS_OK);
     }
 
     public static function getMcpToolDescription(): array

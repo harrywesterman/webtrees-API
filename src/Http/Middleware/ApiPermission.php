@@ -76,6 +76,7 @@ use function Jefferson49\Webtrees\Module\WebtreesApi\Helpers\api_response;
 class ApiPermission implements MiddlewareInterface
 {
     public const array API_READ_HANDLERS = [
+        \Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\CancelledXrefs::class,
         GetRecord::class,
         ListPendingChanges::class,
         GetPendingRecord::class,
@@ -85,6 +86,7 @@ class ApiPermission implements MiddlewareInterface
     ];
 
     public const array API_WRITE_HANDLERS = [
+        \Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers\CreateRecords::class,
         AddChildToFamily::class,
         AddChildToIndividual::class,
         AddParentToIndividual::class,

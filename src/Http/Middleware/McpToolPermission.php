@@ -69,11 +69,13 @@ class McpToolPermission implements MiddlewareInterface
             WebtreesApi::PATH_GET_CITATIONS,
             WebtreesApi::PATH_VERIFY_WRITE,
             WebtreesApi::PATH_SEARCH_STRUCTURED,
-            WebtreesApi::PATH_ADD_FAMILY,
+            WebtreesApi::PATH_CANCELLED_XREFS,
             WebtreesApi::PATH_UPLOAD_MEDIA_STATUS,
         ];
 
         self::$mcp_write_tools = [
+            WebtreesApi::PATH_ADD_FAMILY,
+            WebtreesApi::PATH_CREATE_RECORDS,
             'upload-media', 'upload-media-chunk', 'create-media-upload', 'update-media', 'link-media', 'unlink-media', 'delete-media',
             WebtreesApi::PATH_MODIFY_RECORD,
             WebtreesApi::PATH_ADD_UNLINKED_RECORD,

@@ -9,6 +9,22 @@ use Fisharebest\Webtrees\DB;
 
 final class PendingChangeDetails
 {
+    /** Current rows for write guards, unaffected by an earlier repeatable-read snapshot. */
+    public static function lockedRows(Tree $tree, string $xref): array
+    {
+        // Do not lock a LEFT JOIN: PostgreSQL cannot lock its nullable side.
+        $rows = DB::table('change')->where('gedcom_id', $tree->id())->where('xref', $xref)
+            ->where('status', 'pending')->orderBy('change_id')->lockForUpdate()->get()->all();
+        if ($rows === []) return [];
+        $users = DB::table('user')->whereIn('user_id', array_column($rows, 'user_id'))->get()->keyBy('user_id');
+        foreach ($rows as $row) {
+            $user = $users->get($row->user_id);
+            $row->user_name = $user->user_name ?? '';
+            $row->real_name = $user->real_name ?? '';
+        }
+        return $rows;
+    }
+
     /**
      * @return array<int, object>
      */

@@ -79,8 +79,10 @@ This README file contains the following main sections:
 |MCP/add-source-citation|Link one or more sources to an INDI/FAM record or specific events. Pass `citations: [{source-xref, event, page, note}, …]` to apply several in a single pending change, or `dry-run=true` to preview; duplicate links are no-ops.|
 |MCP/get-citations|Read source citations, including event, page and note details.|
 |Errors|Error responses use `error.code` values such as `token_invalid`, `scope_missing`, `pending_conflict`, `protected_links_would_be_removed`, and `inline_upload_too_large`; the local MCP bridge preserves these codes.|
-|MCP/verify-write|Verify a write as `pending`, `applied`, `pending_delete`, or `deleted` using the SHA-256 record hash returned by the write (pass it as `hash` or `version`; both are aliases). Omit it to just read the current state.|
+|MCP/verify-write|Verify a write as `pending`, `applied`, `pending_delete`, or `deleted` using the SHA-256 record hash returned by the write (pass it as `hash` or `version`; both are aliases). Omit it to read state only (`matches=null`, which does not confirm a write).|
 |MCP/search-structured|Search by name, place, year range, occupation, or full text in NOTE/source fields with stable offset/limit pagination and tree/XREF sorting.|
+|POST/create-records|Create 1–100 records atomically using local IDs for cross-links. Returns all allocated xrefs and record versions; idempotency keys bind to the full payload.|
+|GET/cancelled-xrefs|List retained rejected creation xrefs and change IDs; member read scope plus tree manager rights required. Follow `next-offset`; history may have been purged.|
 |MCP/add-family|Create spouses, children, FAMS/FAMC/CHIL links and family notes in one transactional pending operation; repeat the idempotency key safely.|
 |MCP/upload-media-status|Inspect an owned resumable upload after a transport failure; reports receiving, committing/uncertain, or done without re-uploading.|
 |GET/convert-gedcom|Convert a GEDCOM file. |
@@ -97,14 +99,14 @@ This README file contains the following main sections:
 |DELETE/unlink-spouse|Remove an existing spouse-to-family relationship while preserving both records.|
 |GET/list-pending-changes|List pending approval-queue changes for a tree, optionally filtered by record. Supports `limit`/`offset` pagination (default 100, max 500) and `summary=true` to omit the GEDCOM payloads; the response includes `total`.|
 |GET/get-pending-record|Read the pending GEDCOM changes for a record.|
-|DELETE/cancel-pending|Cancel pending changes for a record before moderator approval. Cancelling a creation leaves an expected gap in the xref sequence; the xref is neither reused nor tombstoned, so tooling must not infer missing records from gaps.|
+|DELETE/cancel-pending|Cancel pending changes for a record before moderator approval. Cancelling a creation leaves an expected gap in the xref sequence; managers can read retained rejected creation history with `cancelled-xrefs`. Tooling must not infer missing records from gaps.|
 |MCP/download-media|Get a short-lived signed URL for a visible media file; no base64 enters the model. The local MCP bridge writes the fetched bytes to a local temporary file.|
-|MCP/create-media-upload|Create a single-use signed URL for a raw image/PDF upload, so no base64 enters the model.|
-|MCP/upload-media-batch|Upload multiple local images and submit one combined pending change for one target.|
+|MCP/create-media-upload|Create single-use signed URLs for one file or a `files` array (1–50), with per-file target/title/note/date. PUT raw image/PDF bytes to each URL; no base64 enters the model.|
+|MCP/upload-media-batch|Stage multiple files without bytes/base64. The bridge reads local paths and PUTs raw bytes; targets may differ per file. PUTs commit independently. The explicit `legacy-inline=true` mode retains the one-target base64 batch.|
 |MCP/upload-media-status|Inspect an owned resumable upload after a transport failure without re-uploading.|
 |GET/get-record|`gedcom-record` remains the default. Full-tree `format=gedcom` requires explicit `allow-full-gedcom=true` plus `confirm-full-gedcom=I_UNDERSTAND_FULL_GEDCOM`.|
 |POST/merge-trees|Merge two trees. |
-|PUT/modify-record|Modify the GEDCOM data of a record. Existing FAMS/FAMC/OBJE/CHIL links are preserved by default; use `remove-protected-links=true` for an explicit removal or `dry-run=true` for a preview.|
+|PUT/modify-record|Modify the GEDCOM data of a record. Existing FAMS/FAMC/OBJE/CHIL links are preserved by default; use `remove-protected-links=true` for an explicit removal. `mode=merge` adds new fact blocks without replacing existing facts. `dry-run=true` reports every removed/added fact block, including changed name sub-tags and source citations.|
 |POST/media|Upload an image, create an OBJE record, and submit its link to an individual, family, or source for approval.|
 |GET/media|Retrieve media metadata, its webtrees URL, and short-lived signed preview/content URLs.|
 |PUT/media|Update media title, date, or note.|
@@ -120,6 +122,83 @@ This README file contains the following main sections:
 |GET/search-general|Perform a general search in webtrees.|
 |GET/trees|Get a list of the available trees.|
 |GET/version|Get the webtrees version.|
+
+
+### Incremental writes and verification
+
+Media uploads, links and metadata edits can queue on the latest pending record.
+They preserve preceding pending facts and links. A stale concurrent media write
+returns 409 with the blocking `change-id` and `xref`; reload the record before
+retrying. Changes approved since the snapshot was read also require a reload;
+there may be no pending change ID in that case. Pending deletion and private-fact
+restrictions still block edits. Both staging and signed PUT uploads enforce the
+API user policy: editor rights, no moderator rights, and automatic approval off.
+
+All GEDCOM record writes return `hash` and `version` (identical SHA-256 values).
+The primary hash belongs to `xref`, or `target-xref` / `family-xref` when no `xref`
+is returned. The `records` array gives an independent receipt for every affected
+record. URL creation is staging only and returns hashes when the subsequent PUT
+writes the records. Deletion receipts hash empty GEDCOM.
+
+For example, after `modify-record` returns `xref: I1, hash: <sha256>`, call
+`verify-write` with `tree`, `xref: I1`, and `hash: <sha256>`. Require `matches: true`;
+`state: pending` means the write is stored but still awaits review. Omitting the
+expected hash returns `matches: null` and is only a state read. A different hash
+means another edit is now current. For multiple records, verify each `records`
+entry separately.
+
+Use `modify-record` with `mode: merge` and a fragment such as
+`1 OCCU Carpenter` or `1 NOTE Research note` to add facts without resending the
+whole record. Merge can queue against the latest pending snapshot; replace
+requires review of existing pending changes. Merge appends distinct complete fact blocks, including sub-tags;
+it does not replace an existing occupation/name or modify a nested citation in
+place. Exact blocks already present are not duplicated. Replacement remains
+available with a full `dry-run` fact diff.
+Before writing, merge compares its snapshot with the current approved or pending
+GEDCOM under database locks. A stale snapshot returns 409 without writing.
+
+`create-records` accepts a `records` array, for example:
+
+```json
+{
+  "tree": "example",
+  "idempotency-key": "research-unit-001",
+  "records": [
+    {"id": "person", "record-type": "INDI", "gedcom": "1 NAME Test\n1 FAMS @family@\n1 SOUR @source@"},
+    {"id": "family", "record-type": "FAM", "gedcom": "1 HUSB @person@"},
+    {"id": "source", "record-type": "SOUR", "gedcom": "1 TITL Register"}
+  ]
+}
+```
+
+All references to local IDs resolve to the newly allocated xrefs. Include
+reciprocal relationship links explicitly. Missing/inaccessible external pointers
+are rejected before allocation. Any database write failure rolls back the whole
+batch. Reusing a key with a different payload returns 409. Moderator approval is
+still per record; atomic submission does not provide atomic group approval.
+Each record has one complete pending creation change, including its generated
+`CHAN` date, time and author; no empty intermediate creation is submitted.
+
+`modify-source` preserves ambiguous repeated fields: attempting to replace more
+than one `TITL`, `AUTH`, `PUBL` or `NOTE` returns 409 with a manual-editing message.
+An absent event in `add-source-citation` returns 404. These are MCP tool errors
+with the original explanation, rather than internal JSON-RPC errors. The local
+bridge also preserves the message of unexpected remote JSON-RPC errors.
+
+For multiple files, call `create-media-upload` or `upload-media-batch` with
+`tree` and `files: [{filename, target-xref, target-type, title, note, date}, ...]`.
+A common target may also be supplied at the top level. PUT each local file with a
+client file/HTTP tool, without placing bytes in MCP arguments. Each URL is
+single-use, expires after ten minutes and accepts at most 20 MiB. The local
+bridge limits a batch to 20 MiB total, validates all local files before staging,
+and reports completed media xrefs if a later PUT fails. Inspect those records
+before retrying a partial batch.
+
+Cancelled creation xrefs come from webtrees' retained rejected change history,
+not a complete allocation ledger. `cancelled-xrefs` excludes currently active
+or reused xrefs, returns `history-complete: false`, and cannot reconstruct purged
+history, unrelated sequence gaps, or old identities after renumbering.
+
 
 ## Installation
 

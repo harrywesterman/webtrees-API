@@ -134,7 +134,7 @@ final class MediaUpload implements RequestHandlerInterface
         }
         fclose($handle);
         foreach (glob($directory . '/*') ?: [] as $file) {
-            if (filemtime($file) < time() - MediaToken::TTL) {
+            if (filemtime($file) < time() - max(MediaToken::TTL, CreateMediaUpload::TTL)) {
                 @unlink($file);
             }
         }

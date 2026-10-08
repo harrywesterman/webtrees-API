@@ -59,6 +59,7 @@ use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
 use Throwable;
 
 use function Jefferson49\Webtrees\Module\WebtreesApi\Helpers\api_response;
@@ -198,6 +199,8 @@ class DeleteRecord implements WebtreesMcpToolRequestHandlerInterface
         I18N::init($default_language);
         Session::put('language', $default_language);
 
+        $written = [$record];
+
         // Code from: Fisharebest\Webtrees\Http\RequestHandlers\DeleteRecord.php
 
         if (Auth::isEditor($record->tree()) && $record->canShow() && $record->canEdit()) {
@@ -216,11 +219,13 @@ class DeleteRecord implements WebtreesMcpToolRequestHandlerInterface
                         /* I18N: %s is the name of a family group, e.g. “Husband name + Wife name” */
                         $message .= (MoreI18N::xlate('The family “%s” has been deleted because it only has one member.', $linker->fullName()));
                         $linker->deleteRecord();
+                        $written[] = $linker;
                         // Delete the remaining link to this family
                         $relict = Registry::gedcomRecordFactory()->make($match[2][0], $tree);
                         if ($relict instanceof Individual) {
                             $relict_gedcom = $this->removeLinks($relict->gedcom(), $linker->xref());
                             $relict->updateRecord($relict_gedcom, false);
+                            $written[] = $relict;
                             /* I18N: %s are names of records, such as sources, repositories or individuals */
                             $message .= (MoreI18N::xlate('The link from “%1$s” to “%2$s” has been deleted.', sprintf('<a href="%1$s" class="alert-link">%2$s</a>', e($relict->url()), $relict->fullName()), $linker->fullName()));
                         }
@@ -229,6 +234,7 @@ class DeleteRecord implements WebtreesMcpToolRequestHandlerInterface
                         /* I18N: %s are names of records, such as sources, repositories or individuals */
                         $message .= (MoreI18N::xlate('The link from “%1$s” to “%2$s” has been deleted.', sprintf('<a href="%1$s" class="alert-link">%2$s</a>', e($linker->url()), $linker->fullName()), $record->fullName()));
                         $linker->updateRecord($new_gedcom, false);
+                        $written[] = $linker;
                     }
                 }
             }
@@ -240,7 +246,7 @@ class DeleteRecord implements WebtreesMcpToolRequestHandlerInterface
         I18N::init($current_language);
         Session::put('language', $current_language);
 
-        return api_response(['xref' => $xref, 'state' => 'pending_delete', 'message' => 'Deletion requested; verify-write will report when it is applied.'], StatusCodeInterface::STATUS_ACCEPTED);
+        return api_response(RecordVersion::receipt($tree, ['xref' => $xref, 'state' => 'pending_delete', 'message' => 'Deletion requested; verify-write will report when it is applied.'], $written), StatusCodeInterface::STATUS_ACCEPTED);
     }
 
     /**

@@ -188,6 +188,10 @@ class McpTool implements RequestHandlerInterface
                 case WebtreesApi::PATH_SEARCH_STRUCTURED:
                     $handler = Registry::container()->get(SearchStructured::class);
                     return $this->handleMcpTool($id, $request, $handler);
+                case WebtreesApi::PATH_CREATE_RECORDS:
+                    return $this->handleMcpTool($id, $request, Registry::container()->get(CreateRecords::class));
+                case WebtreesApi::PATH_CANCELLED_XREFS:
+                    return $this->handleMcpTool($id, $request, Registry::container()->get(CancelledXrefs::class));
                 case WebtreesApi::PATH_ADD_FAMILY:
                     $handler = Registry::container()->get(AddFamily::class);
                     return $this->handleMcpTool($id, $request, $handler);

@@ -57,6 +57,7 @@ use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
 use Throwable;
 
 use function Jefferson49\Webtrees\Module\WebtreesApi\Helpers\api_response;
@@ -257,7 +258,7 @@ class LinkSpouseToIndividual implements WebtreesMcpToolRequestHandlerInterface
         $individual->createFact('1 FAMS @' . $family->xref() . '@', false);
         $spouse->createFact('1 FAMS @' . $family->xref() . '@', false);
 
-        return api_response(new XrefItem($spouse->xref()), StatusCodeInterface::STATUS_OK);
+        return api_response(RecordVersion::receipt($tree, ['xref' => $spouse->xref()], [$spouse , $individual, $family]), StatusCodeInterface::STATUS_OK);
     }
 
 	/**
