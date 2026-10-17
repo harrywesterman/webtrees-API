@@ -124,11 +124,17 @@ namespace {
     foreach ($receipt['records'] as $item) {
         $row = DB::table('change')->where('xref', $item['xref'])->first();
         check($row->old_gedcom === '' && str_contains($row->new_gedcom, '1 CHAN') && str_contains($row->new_gedcom, '2 _WT_USER editor'), 'Native batch retains creation audit data');
+        check(!str_contains($row->new_gedcom, '_WT_API_'), 'Created GEDCOM carries no API bookkeeping tag');
         check($item['hash'] === RecordVersion::fromGedcom($row->new_gedcom)['hash'], 'Native batch hash matches complete creation GEDCOM');
     }
+    check(DB::table('webtrees_api_idempotency')->count() === 2, 'Batch key maps local ids to xrefs outside the GEDCOM');
     check($create->handle(request($input))->getStatusCode() === 200 && DB::table('change')->count() === 2, 'Batch replay does not insert skeletons or duplicates');
-    $historyReads = array_values(array_filter($grammar->mysqlReads, fn ($sql) => str_contains($sql, '`new_gedcom` like')));
-    check(count($historyReads) === 2 && count(array_filter($historyReads, fn ($sql) => str_ends_with($sql, 'for update'))) === 2, 'First batch and replay both read current MySQL history, including commits after an earlier snapshot');
+    $storeReads = array_values(array_filter($grammar->mysqlReads, fn ($sql) => str_contains($sql, '`webtrees_api_idempotency`') && str_contains($sql, '`idempotency_key` =')));
+    check(count($storeReads) === 2 && count(array_filter($storeReads, fn ($sql) => str_ends_with($sql, 'for update'))) === 2, 'First batch and replay both read the idempotency store under the write lock');
+    $conflict = $create->handle(request(['idempotency-key'=>'native-batch-001', 'records'=>[
+        ['id'=>'person', 'record-type'=>'INDI', 'gedcom'=>'1 NAME Other'],
+    ]]));
+    check($conflict->getStatusCode() === 409 && DB::table('change')->count() === 2, 'A key bound to another payload stays a conflict');
     // Approved replay must still work with an empty factory cache (including a
     // transaction whose earlier consistent reads could not see the new xrefs).
     foreach ($receipt['records'] as $item) {
@@ -144,7 +150,13 @@ namespace {
     check(array_column($approvedReplay['records'], 'hash') === array_column($receipt['records'], 'hash'), 'Approved replay returns the actual creation hashes without cached records');
     $versionReads = array_filter($grammar->mysqlReads, fn ($sql) => str_starts_with($sql, 'select * from `change`') || str_contains($sql, '_gedcom` from'));
     check(count($versionReads) >= 5 && count(array_filter($versionReads, fn ($sql) => !str_ends_with($sql, 'for update'))) === 0, 'Replay versions use current pending and approved reads under the same lock');
+    // A cancelled batch keeps its key, but a replay must not claim the
+    // records exist: the store remembers xrefs that no longer do.
+    DB::table('change')->update(['status'=>'rejected']);
+    $cancelledReplay = $create->handle(request($input));
+    check($cancelledReplay->getStatusCode() === 409 && str_contains((string) $cancelledReplay->getBody(), 'cancelled'), 'Replay of a cancelled batch reports the cancellation instead of the xrefs');
     DB::table('change')->delete();
+    DB::table('webtrees_api_idempotency')->delete();
 
     $old = "0 @I1@ INDI\n1 NAME Test";
     Registry::$records['I1'] = new GedcomRecord('I1', $old, null, $tree);
@@ -208,7 +220,18 @@ namespace {
     $familyResponse = (new AddFamily($trees))->handle(request(['idempotency-key'=>'native-family-001', 'husband'=>['name'=>'New person']]));
     check($familyResponse->getStatusCode() === 202, 'Native add-family accepts a newly created Individual: ' . $familyResponse->getBody());
     check(count(array_filter(Registry::$records, fn ($record) => $record instanceof Fisharebest\Webtrees\Individual)) === 1, 'Native family participant has the correct record class');
+    $familyReceipt = json_decode((string) $familyResponse->getBody(), true);
+    foreach (DB::table('change')->get() as $row) {
+        check(!str_contains($row->new_gedcom, '_WT_API_'), 'Family write carries no API bookkeeping tag');
+    }
+    $familyReplay = (new AddFamily($trees))->handle(request(['idempotency-key'=>'native-family-001', 'husband'=>['name'=>'New person']]));
+    check($familyReplay->getStatusCode() === 200 && json_decode((string) $familyReplay->getBody(), true)['family-xref'] === $familyReceipt['family-xref'], 'Family replay returns the same xref from the store, not a second family');
+    check(count(array_filter(Registry::$records, fn ($record) => $record instanceof Fisharebest\Webtrees\Individual)) === 1, 'Family replay creates no participant');
+    DB::table('change')->update(['status'=>'rejected']);
+    $familyCancelled = (new AddFamily($trees))->handle(request(['idempotency-key'=>'native-family-001', 'husband'=>['name'=>'New person']]));
+    check($familyCancelled->getStatusCode() === 409, 'Family replay after cancellation is a conflict, not a ghost xref');
     DB::table('change')->delete();
+    DB::table('webtrees_api_idempotency')->delete();
 
     $duplicate = "0 @S1@ SOUR\n1 TITL First\n1 TITL Second";
     Registry::$records['S1'] = new GedcomRecord('S1', $duplicate, null, $tree);

@@ -179,6 +179,19 @@ still per record; atomic submission does not provide atomic group approval.
 Each record has one complete pending creation change, including its generated
 `CHAN` date, time and author; no empty intermediate creation is submitted.
 
+An idempotency key is transport metadata, so it is stored in the module's own
+table (`webtrees_api_idempotency`) instead of in the record: webtrees reports
+unknown tags such as the former `_WT_API_CREATE` / `_WT_API_IDEMPOTENCY` lines as
+errors on the record page and includes them in every export. The table is
+created on first use and keeps the tree, key, payload hash and the local-id →
+xref mapping for 90 days; the database user therefore needs the right to create
+that one table. A replay whose records were cancelled afterwards
+returns 409 rather than xrefs that no longer exist. `add-family` uses the same
+table; its key is checked inside the write transaction, so concurrent retries
+cannot create a second family. Keys used before an upgrade are not in the table:
+replaying one creates a new batch, and the tags already written by older
+versions have to be removed once with `modify-record`.
+
 `modify-source` preserves ambiguous repeated fields: attempting to replace more
 than one `TITL`, `AUTH`, `PUBL` or `NOTE` returns 409 with a manual-editing message.
 An absent event in `add-source-citation` returns 404. These are MCP tool errors

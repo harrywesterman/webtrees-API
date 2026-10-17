@@ -7,9 +7,12 @@ require __DIR__ . '/../autoload.php';
 $checks = 0;
 function check(bool $condition, string $message): void { global $checks; ++$checks; if (!$condition) throw new RuntimeException($message); }
 
-foreach (['GetSources.php', 'SearchStructured.php', 'AddFamily.php'] as $file) {
+$lock = "DB::table('gedcom')->where('gedcom_id', \$tree->id())->lockForUpdate()->first()";
+foreach (['GetSources.php', 'SearchStructured.php', 'AddFamily.php', 'CreateRecords.php'] as $file) {
     $source = file_get_contents(__DIR__ . '/../src/Http/RequestHandlers/' . $file);
-    check(!str_contains($source, "DB::table('gedcom')"), $file . ' does not query wt_gedcom as records');
+    // Locking the tree row to serialize writers is fine; reading records from
+    // wt_gedcom is not (it holds the tree, not the GEDCOM).
+    check(!str_contains(str_replace($lock, '', $source), "DB::table('gedcom')"), $file . ' does not query wt_gedcom as records');
 }
 $search = file_get_contents(__DIR__ . '/../src/Http/RequestHandlers/SearchStructured.php');
 $sources = file_get_contents(__DIR__ . '/../src/Http/RequestHandlers/GetSources.php');

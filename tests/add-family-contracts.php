@@ -15,5 +15,7 @@ check(str_contains($source, "1 CHIL"), 'CHIL links are built');
 check(str_contains($source, "'FAMS'"), 'FAMS links are built');
 check(str_contains($source, "'FAMC'"), 'FAMC links are built');
 check(str_contains($source, "'pending' => true"), 'Receipt identifies pending transaction');
-check(str_contains($source, "DB::table('families')"), 'Idempotency checks the families record table');
+check(str_contains($source, "IdempotencyStore::lookup"), 'Idempotency keys are resolved from the store, not the record');
+check(str_contains($source, "IdempotencyStore::record"), 'Idempotency keys are recorded outside the GEDCOM');
+check(!str_contains($source, '_WT_API_'), 'No bookkeeping tag is written into the family');
 echo "Add-family contract checks passed: {$checks}\n";

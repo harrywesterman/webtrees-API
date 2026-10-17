@@ -327,10 +327,20 @@ class McpProtocol implements MiddlewareInterface
 
         // In case of an error
         if ($status_code === StatusCodeInterface::STATUS_INTERNAL_SERVER_ERROR) {
+            // The handler already explained what went wrong. Throw it away and
+            // the client only sees "500: Internal Server Error", which hides
+            // the cause - pass the body on to the caller (the authenticated
+            // user who made the change) while keeping it out of the log.
+            $content_stream->rewind();
+            $error_content = '';
+            while (!$content_stream->eof()) {
+                $error_content .= $content_stream->read(8192);
+            }
+
             // Never log tool content: it may contain private GEDCOM or base64.
             CustomModuleLog::addDebugLog($log_module, 'Error in MCP tool result: ' . $status_code . ' ' . $reason_phrase);
 
-            throw new Exception($reason_phrase);
+            throw new Exception($reason_phrase . ': ' . trim($error_content));
         }
         elseif (!in_array($status_code, $success_codes)) {
             $content_stream->rewind();

@@ -9,7 +9,10 @@ use Fisharebest\Webtrees\Registry;
 use Fisharebest\Webtrees\Services\PendingChangesService;
 use Fisharebest\Webtrees\Services\TreeService;
 use Fisharebest\Webtrees\Validator;
+use Jefferson49\Webtrees\Helpers\Functions;
+use Jefferson49\Webtrees\Log\CustomModuleLog;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\PendingChangeDetails;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Schema\Mcp as McpSchema;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\CheckAccess;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Validation\QueryParamValidator;
@@ -48,14 +51,24 @@ final class CancelPending implements WebtreesMcpToolRequestHandlerInterface
 
             $pending = PendingChangeDetails::rows($tree, $xref);
             if ($pending === []) return api_response('No pending changes found', StatusCodeInterface::STATUS_NOT_FOUND);
+            $cancelled = count($pending);
             if ($change_id === '') {
                 $this->pending_changes_service->rejectRecord($record);
             } else {
                 $this->pending_changes_service->rejectChange($record, $change_id);
             }
 
-            Registry::cache()->array()->clear();
-            return api_response(\Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion::receipt($tree, ['tree' => $tree_name, 'xref' => $xref, 'cancelled' => count($pending), 'change-id' => $change_id], [$xref]), StatusCodeInterface::STATUS_OK);
+            // The rejection is committed at this point. A failure while
+            // building the receipt must not turn that into a 500: clients
+            // treat an error as "nothing happened" and repeat a destructive
+            // call. Report the cancellation, log the receipt problem.
+            $payload = ['tree' => $tree_name, 'xref' => $xref, 'cancelled' => $cancelled, 'change-id' => $change_id];
+            try {
+                return api_response(RecordVersion::receipt($tree, $payload, [$xref]), StatusCodeInterface::STATUS_OK);
+            } catch (Throwable $th) {
+                CustomModuleLog::addDebugLog(Functions::getFromContainer(WebtreesApi::class), 'cancel-pending receipt failed: ' . $th->getMessage());
+                return api_response($payload, StatusCodeInterface::STATUS_OK);
+            }
         } catch (Throwable $th) {
             return api_response($th->getMessage(), StatusCodeInterface::STATUS_INTERNAL_SERVER_ERROR);
         }

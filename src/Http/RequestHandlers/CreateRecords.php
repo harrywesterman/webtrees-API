@@ -9,6 +9,7 @@ use Fisharebest\Webtrees\DB;
 use Fisharebest\Webtrees\Auth;
 use Fisharebest\Webtrees\Registry;
 use Fisharebest\Webtrees\Services\TreeService;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\IdempotencyStore;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordBatch;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\SourceContext;
@@ -51,22 +52,18 @@ final class CreateRecords implements WebtreesMcpToolRequestHandlerInterface
             if (!is_string($key) || !preg_match('/^[A-Za-z0-9.:-]{8,128}$/D', $key)) throw new DomainException('idempotency-key must be 8-128 safe characters.', 400);
             $prepared = RecordBatch::prepare($input['records'] ?? null);
             $fingerprint = hash('sha256', json_encode($prepared, JSON_THROW_ON_ERROR));
+            // Transport bookkeeping lives outside the GEDCOM: webtrees shows
+            // unknown tags as errors on the record page and every export.
+            IdempotencyStore::ensureTable();
             $result = DB::connection()->transaction(function () use ($tree, $key, $prepared, $fingerprint): array|ResponseInterface {
                 DB::table('gedcom')->where('gedcom_id', $tree->id())->lockForUpdate()->first();
-                // The native change log survives approval; rejected writes are
-                // excluded. A key binds to the complete payload, never just a name.
-                $history = DB::table('change')->where('gedcom_id', $tree->id())->whereIn('status', ['pending', 'accepted'])
-                    ->where('new_gedcom', 'like', '%1 _WT_API_CREATE ' . $key . ' %')->orderBy('change_id')->lockForUpdate()->get();
-                $prior = [];
-                foreach ($history as $row) {
-                    if (preg_match('/^1 _WT_API_CREATE ' . preg_quote($key, '/') . ' ([a-f0-9]{64}) ([A-Za-z0-9_:-]+)$/m', $row->new_gedcom, $match)) {
-                        if (!hash_equals($fingerprint, $match[1])) throw new DomainException('Idempotency key was already used for a different records payload.', 409);
-                        $prior[$match[2]] = (string) $row->xref;
-                    }
-                }
+                // A key binds to the complete payload, never just a name. A
+                // replay must find its records still pending or approved.
+                $prior = IdempotencyStore::lookup($tree, $key, IdempotencyStore::KIND_RECORDS);
                 if ($prior !== []) {
-                    if (count($prior) !== count($prepared)) throw new DomainException('Part of the prior batch was cancelled; inspect it before retrying with a new key.', 409);
-                    return RecordVersion::receipt($tree, ['xref' => reset($prior), 'xrefs' => (object) $prior, 'idempotent' => true], array_values($prior));
+                    if (!hash_equals($prior['hash'], $fingerprint)) throw new DomainException('Idempotency key was already used for a different records payload.', 409);
+                    if (!IdempotencyStore::stillLive($tree, $prior['xrefs'])) throw new DomainException('Part of the prior batch was cancelled; inspect it before retrying with a new key.', 409);
+                    return RecordVersion::receipt($tree, ['xref' => reset($prior['xrefs']), 'xrefs' => (object) $prior['xrefs'], 'idempotent' => true], array_values($prior['xrefs']));
                 }
                 foreach ($prepared as $item) {
                     foreach (RecordBatch::references($item['gedcom']) as $reference) {
@@ -85,13 +82,13 @@ final class CreateRecords implements WebtreesMcpToolRequestHandlerInterface
                 $chan = "\n1 CHAN\n2 DATE " . strtoupper(date('d M Y')) . "\n3 TIME " . date('H:i:s')
                     . "\n2 _WT_USER " . Auth::user()->userName();
                 foreach ($prepared as $id => $item) {
-                    $gedcom = '0 @' . $xrefs[$id] . '@ ' . $item['record-type'] . "\n" . RecordBatch::resolve($item['gedcom'], $xrefs)
-                        . "\n1 _WT_API_CREATE " . $key . ' ' . $fingerprint . ' ' . $id . $chan;
+                    $gedcom = '0 @' . $xrefs[$id] . '@ ' . $item['record-type'] . "\n" . RecordBatch::resolve($item['gedcom'], $xrefs) . $chan;
                     DB::table('change')->insert([
                         'gedcom_id' => $tree->id(), 'xref' => $xrefs[$id], 'old_gedcom' => '',
                         'new_gedcom' => $gedcom, 'status' => 'pending', 'user_id' => Auth::id(),
                     ]);
                 }
+                IdempotencyStore::record($tree, $key, $fingerprint, IdempotencyStore::KIND_RECORDS, $xrefs);
                 return RecordVersion::receipt($tree, ['xref' => reset($xrefs), 'xrefs' => (object) $xrefs, 'idempotent' => false, 'pending' => true], array_values($xrefs));
             });
             if ($result instanceof ResponseInterface) return $result;

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers;
 
 use Fisharebest\Webtrees\DB;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\IdempotencyStore;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
 use Fisharebest\Webtrees\Individual;
 use Fisharebest\Webtrees\Services\TreeService;
@@ -33,14 +34,19 @@ final class AddFamily implements WebtreesMcpToolRequestHandlerInterface
             if ($write->getStatusCode() !== 200) return $write;
             $key = trim((string) ($input['idempotency-key'] ?? $input['idempotency_key'] ?? ''));
             if ($key === '' || !preg_match('/^[A-Za-z0-9._:-]{8,128}$/', $key)) return api_response('idempotency-key is required and must be 8-128 safe characters.', 400);
-            $marker = '1 _WT_API_IDEMPOTENCY ' . $key;
-            $existing = DB::table('families')->where('f_file', $tree->id())->where('f_gedcom', 'like', '%' . $marker . '%')->get(['f_id']);
-            if ($existing->isNotEmpty()) {
-                $family = $existing->first();
-                return api_response(RecordVersion::receipt($tree, ['idempotent' => true, 'family-xref' => $family->f_id, 'record-xrefs' => [$family->f_id]], [$family->f_id]), 200);
-            }
             if (!array_key_exists('husband', $input) && !array_key_exists('wife', $input) && empty($input['children'])) return api_response('At least one spouse or child is required.', 400);
-            $result = DB::connection()->transaction(function () use ($tree, $input, $marker): array {
+            // Transport bookkeeping lives outside the GEDCOM: webtrees shows
+            // unknown tags as errors on the record page and every export.
+            IdempotencyStore::ensureTable();
+            $result = DB::connection()->transaction(function () use ($tree, $input, $key): array {
+                // Serialize replays with new families for the same tree.
+                DB::table('gedcom')->where('gedcom_id', $tree->id())->lockForUpdate()->first();
+                $prior = IdempotencyStore::lookup($tree, $key, IdempotencyStore::KIND_FAMILY);
+                if ($prior !== []) {
+                    $xref = (string) reset($prior['xrefs']);
+                    if (!IdempotencyStore::stillLive($tree, [$xref])) throw new \DomainException('The family created with this idempotency key was cancelled; use a new key.', 409);
+                    return RecordVersion::receipt($tree, ['idempotent' => true, 'family-xref' => $xref, 'record-xrefs' => [$xref]], [$xref]);
+                }
                 $spouses = [];
                 foreach (['husband' => 'HUSB', 'wife' => 'WIFE'] as $keyName => $familyTag) {
                     if (!array_key_exists($keyName, $input)) continue;
@@ -51,15 +57,18 @@ final class AddFamily implements WebtreesMcpToolRequestHandlerInterface
                 $familyGedcom = '0 @@ FAM';
                 foreach ($spouses as [$tag, $participant]) $familyGedcom .= "\n1 {$tag} @{$participant['xref']}@";
                 foreach ($children as $participant) $familyGedcom .= "\n1 CHIL @{$participant['xref']}@";
-                $familyGedcom .= "\n" . $marker;
                 if (($input['gedcom'] ?? '') !== '') $familyGedcom .= "\n" . trim((string) $input['gedcom']);
                 if (($input['note'] ?? '') !== '') $familyGedcom .= "\n1 NOTE " . trim((string) $input['note']);
                 $family = $tree->createRecord($familyGedcom);
                 foreach ($spouses as [$tag, $participant]) $this->link($participant['record'], 'FAMS', $family->xref());
                 foreach ($children as $participant) $this->link($participant['record'], 'FAMC', $family->xref());
-                return RecordVersion::receipt($tree, ['family-xref' => $family->xref(), 'record-xrefs' => array_values(array_unique([$family->xref(), ...array_map(static fn (array $v): string => $v[1]['xref'], $spouses), ...array_map(static fn (array $v): string => $v['xref'], $children)]))], [$family, ...array_map(static fn (array $v) => $v[1]['record'], $spouses), ...array_map(static fn (array $v) => $v['record'], $children)]);
+                IdempotencyStore::record($tree, $key, '', IdempotencyStore::KIND_FAMILY, ['family' => $family->xref()]);
+                return RecordVersion::receipt($tree, ['idempotent' => false, 'family-xref' => $family->xref(), 'record-xrefs' => array_values(array_unique([$family->xref(), ...array_map(static fn (array $v): string => $v[1]['xref'], $spouses), ...array_map(static fn (array $v): string => $v['xref'], $children)]))], [$family, ...array_map(static fn (array $v) => $v[1]['record'], $spouses), ...array_map(static fn (array $v) => $v['record'], $children)]);
             });
-            return api_response($result + ['idempotent' => false, 'pending' => true], 202);
+            if ($result['idempotent'] ?? false) return api_response($result, 200);
+            return api_response($result + ['pending' => true], 202);
+        } catch (\DomainException $exception) {
+            return api_response($exception->getMessage(), $exception->getCode() ?: 400);
         } catch (\Throwable $exception) {
             return api_response($exception->getMessage(), 400);
         }
