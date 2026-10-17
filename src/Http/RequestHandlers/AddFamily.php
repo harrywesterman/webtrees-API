@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Jefferson49\Webtrees\Module\WebtreesApi\Http\RequestHandlers;
 
 use Fisharebest\Webtrees\DB;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\GedcomStructure;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\IdempotencyStore;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
 use Fisharebest\Webtrees\Individual;
@@ -59,6 +60,10 @@ final class AddFamily implements WebtreesMcpToolRequestHandlerInterface
                 foreach ($children as $participant) $familyGedcom .= "\n1 CHIL @{$participant['xref']}@";
                 if (($input['gedcom'] ?? '') !== '') $familyGedcom .= "\n" . trim((string) $input['gedcom']);
                 if (($input['note'] ?? '') !== '') $familyGedcom .= "\n1 NOTE " . trim((string) $input['note']);
+                // Everything the client supplied - gedcom fragment and note -
+                // must use structures webtrees can render.
+                $problems = GedcomStructure::problems('FAM', $familyGedcom);
+                if ($problems !== []) throw new \DomainException(GedcomStructure::message($problems), 422);
                 $family = $tree->createRecord($familyGedcom);
                 foreach ($spouses as [$tag, $participant]) $this->link($participant['record'], 'FAMS', $family->xref());
                 foreach ($children as $participant) $this->link($participant['record'], 'FAMC', $family->xref());

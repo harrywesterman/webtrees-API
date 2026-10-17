@@ -202,7 +202,7 @@ class AddParentToIndividual implements WebtreesMcpToolRequestHandlerInterface
         }
 
         // Validate GEDCOM
-        $gedcom_validation_response = QueryParamValidator::validateGedcomRecord($gedcom);
+        $gedcom_validation_response = QueryParamValidator::validateGedcomRecord($gedcom, true, 'INDI');
         if ($gedcom_validation_response->getStatusCode() !== StatusCodeInterface::STATUS_OK) {
             return $gedcom_validation_response;
         }

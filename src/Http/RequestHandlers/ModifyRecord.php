@@ -44,6 +44,7 @@ use Jefferson49\Webtrees\Authorization\Auth;
 use Jefferson49\Webtrees\Helpers\Authorization;
 use Jefferson49\Webtrees\Helpers\Functions;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\GedcomRecordMutation;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\GedcomStructure;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordSnapshot;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\PendingChangeDetails;
@@ -134,6 +135,7 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
         ],
         responses: [
             new OA\Response(response: '202', description: 'Record submitted; returns xref, hash, version and per-record receipts.'),
+            new OA\Response(response: '422', description: 'GEDCOM structure webtrees cannot render; the message names the offending paths.'),
             new OA\Response(
                 response: '200',
                 description: 'Successfully modified record.',
@@ -300,6 +302,15 @@ class ModifyRecord implements WebtreesMcpToolRequestHandlerInterface
 
         if ($mode === 'merge') {
             $modified_gedcom = GedcomRecordMutation::mergeFacts($record->gedcom(), $modified_gedcom);
+        }
+
+        // Structures webtrees does not know would show up as red error lines on
+        // the record page after approval. Unknown paths that the record already
+        // carries (e.g. tags written by an older module version) are left alone
+        // so that they can still be removed.
+        $problems = GedcomStructure::problems($record->tag(), $modified_gedcom, $record->gedcom());
+        if ($problems !== []) {
+            return api_response(GedcomStructure::message($problems), StatusCodeInterface::STATUS_UNPROCESSABLE_ENTITY);
         }
 
         $removed_links = self::removedProtectedLinks($record->gedcom(), $modified_gedcom);

@@ -63,6 +63,7 @@ use OpenApi\Attributes as OA;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\GedcomStructure;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
 use Throwable;
 
@@ -220,7 +221,7 @@ class AddUnlinkedRecord implements WebtreesMcpToolRequestHandlerInterface
         $gedcom = trim($gedcom);
 
         // Validate GEDCOM
-        $gedcom_validation_response = QueryParamValidator::validateGedcomRecord($gedcom);
+        $gedcom_validation_response = QueryParamValidator::validateGedcomRecord($gedcom, true, $record_type);
         if ($gedcom_validation_response->getStatusCode() !== StatusCodeInterface::STATUS_OK) {
             return $gedcom_validation_response;
         }
@@ -243,7 +244,12 @@ class AddUnlinkedRecord implements WebtreesMcpToolRequestHandlerInterface
         }
 
         // Create record
-        $record = $tree->createRecord('0 @@ ' . $record_type . $note_submitter_text . "\n" . $gedcom . $level1_note);
+        $record_gedcom = '0 @@ ' . $record_type . $note_submitter_text . "\n" . $gedcom . $level1_note;
+        $problems = GedcomStructure::problems($record_type, $record_gedcom);
+        if ($problems !== []) {
+            return api_response(GedcomStructure::message($problems), StatusCodeInterface::STATUS_UNPROCESSABLE_ENTITY);
+        }
+        $record = $tree->createRecord($record_gedcom);
 
         return api_response(RecordVersion::receipt($tree, ['xref' => $record->xref()], [$record]), StatusCodeInterface::STATUS_CREATED);
     }

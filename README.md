@@ -198,6 +198,17 @@ An absent event in `add-source-citation` returns 404. These are MCP tool errors
 with the original explanation, rather than internal JSON-RPC errors. The local
 bridge also preserves the message of unexpected remote JSON-RPC errors.
 
+Every tool that accepts raw GEDCOM (`create-records`, `modify-record`,
+`add-family`, `add-unlinked-record` and the `add-…` tools that create a person)
+checks the fragment against the same tag registry webtrees uses to decide whether
+a line is an "Unrecognized GEDCOM code". A structure webtrees cannot render is
+refused with 422 before anything is written; the message names the offending
+paths and lists the tags webtrees does accept at that position. For a source
+record that means `DATE`/`PLAC` belong under `DATA > EVEN` and the transcript in
+`TEXT`, not `DATE`/`PLAC` at record level and `DATA > TEXT`. Unknown paths that
+the record already carries are tolerated, so tags left by older module versions
+can still be removed with `modify-record`.
+
 For multiple files, call `create-media-upload` or `upload-media-batch` with
 `tree` and `files: [{filename, target-xref, target-type, title, note, date}, ...]`.
 A common target may also be supplied at the top level. PUT each local file with a

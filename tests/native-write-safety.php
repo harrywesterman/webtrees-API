@@ -21,8 +21,10 @@ namespace Fisharebest\Webtrees {
     class Registry {
         public static array $records = [];
         public static $response;
+        public static $element_factory;
         public static int $next = 100;
         public static function responseFactory() { return self::$response; }
+        public static function elementFactory() { return self::$element_factory; }
         public static function container() { return new class { public function get($class) { return new \stdClass(); } }; }
         public static function xrefFactory() { return new class { public function make($type) { return 'X' . ++Registry::$next; } }; }
         public static function individualFactory() { return new class {
@@ -81,6 +83,12 @@ namespace {
 
     $factory = new Nyholm\Psr7\Factory\Psr17Factory();
     Registry::$response = new Fisharebest\Webtrees\Factories\ResponseFactory($factory, $factory);
+    // Real webtrees tag registry (GEDCOM 5.5.1 + webtrees tags, without the
+    // vendor custom tags that need a database). This is what decides whether
+    // webtrees renders a tag as an "Unrecognized GEDCOM code".
+    @Fisharebest\Webtrees\I18N::init('en', true);
+    Registry::$element_factory = new Fisharebest\Webtrees\Factories\ElementFactory();
+    (new Fisharebest\Webtrees\Gedcom())->registerTags(Registry::$element_factory, false);
     (new ReflectionClass(McpProtocol::class))->getProperty('stream_factory')->setValue(null, $factory);
     $db = new DB();
     $db->addConnection(['driver'=>'sqlite', 'database'=>':memory:']);
@@ -96,6 +104,9 @@ namespace {
         $t->string('change_time')->default('2026-10-08 00:00:00');
     });
     DB::schema()->create('user', function ($t) { $t->integer('user_id'); $t->string('user_name'); $t->string('real_name'); });
+    // Site preferences: some elements (e.g. FamilyRecord) build their sub-tag
+    // list from them, so the table must exist for strict tag validation.
+    DB::schema()->create('site_setting', function ($t) { $t->string('setting_name'); $t->text('setting_value'); });
     $tree = new Tree(1, 'test', 'Test', '', '', true, false, null, null);
     $trees = new TreeService($tree);
     $checks = 0;
@@ -158,6 +169,21 @@ namespace {
     DB::table('change')->delete();
     DB::table('webtrees_api_idempotency')->delete();
 
+    // Issue #21: a fragment webtrees would render as a red error line is
+    // refused before an xref is allocated or anything is written.
+    $citationForm = $create->handle(request(['idempotency-key'=>'bad-sour-001', 'records'=>[
+        ['id'=>'bron', 'record-type'=>'SOUR', 'gedcom'=>"1 TITL Akte 84\n1 DATE 27 NOV 1828\n1 PLAC Bedum\n1 DATA\n2 TEXT transcriptie"],
+    ]]));
+    check($citationForm->getStatusCode() === 422, 'Unsupported GEDCOM structures are refused with 422: ' . $citationForm->getBody());
+    check(str_contains((string) $citationForm->getBody(), 'SOUR:DATE') && str_contains((string) $citationForm->getBody(), 'SOUR:DATA:TEXT'), 'The rejection names the offending paths');
+    check(DB::table('change')->count() === 0 && DB::table('webtrees_api_idempotency')->count() === 0, 'A refused batch writes nothing');
+    $sourceForm = $create->handle(request(['idempotency-key'=>'good-sour-001', 'records'=>[
+        ['id'=>'bron', 'record-type'=>'SOUR', 'gedcom'=>"1 TITL Akte 84\n1 DATA\n2 EVEN BIRT\n3 DATE 27 NOV 1828\n3 PLAC Bedum\n1 TEXT transcriptie"],
+    ]]));
+    check($sourceForm->getStatusCode() === 202, 'The structure webtrees accepts is taken: ' . $sourceForm->getBody());
+    DB::table('change')->delete();
+    DB::table('webtrees_api_idempotency')->delete();
+
     $old = "0 @I1@ INDI\n1 NAME Test";
     Registry::$records['I1'] = new GedcomRecord('I1', $old, null, $tree);
     $accepted = $old . "\n1 OCCU Farmer";
@@ -173,6 +199,20 @@ namespace {
     DB::table('change')->where('xref','I1')->update(['status'=>'accepted']);
     check(!DB::connection()->transaction(fn () => RecordSnapshot::isCurrent(Registry::$records['I1'])), 'Native stale pending object is rejected after moderation');
     DB::table('change')->delete();
+
+    // Same guard on modify-record, and the way out: an unknown tag that the
+    // record already carries stays editable (so it can be removed).
+    DB::table('change')->delete();
+    $unknown = $modify->handle(request(['xref'=>'I1', 'gedcom'=>"1 OCCU Farmer\n1 XYZ onbekend"]));
+    check($unknown->getStatusCode() === 422 && str_contains((string) $unknown->getBody(), 'INDI:XYZ'), 'modify-record refuses an unknown structure');
+    check(DB::table('change')->count() === 0, 'A refused modification writes nothing');
+    Registry::$records['I1'] = new GedcomRecord('I1', $accepted . "\n1 _WT_API_CREATE oud hash id", null, $tree);
+    DB::table('individuals')->where('i_id', 'I1')->update(['i_gedcom' => $accepted . "\n1 _WT_API_CREATE oud hash id"]);
+    $legacy = $modify->handle(request(['xref'=>'I1', 'gedcom'=>"1 OCCU Farmer\n1 NOTE Added"]));
+    check($legacy->getStatusCode() === 202, 'A legacy tag already on the record does not block editing: ' . $legacy->getBody());
+    DB::table('change')->delete();
+    DB::table('individuals')->where('i_id', 'I1')->update(['i_gedcom' => $accepted]);
+    Registry::$records['I1'] = new GedcomRecord('I1', $accepted, null, $tree);
 
     $media = new Media($trees, new Fisharebest\Webtrees\Services\LinkedRecordService());
     Registry::$records['I1'] = new GedcomRecord('I1', $old . "\n1 NOTE Keep", null, $tree);
@@ -227,6 +267,8 @@ namespace {
     $familyReplay = (new AddFamily($trees))->handle(request(['idempotency-key'=>'native-family-001', 'husband'=>['name'=>'New person']]));
     check($familyReplay->getStatusCode() === 200 && json_decode((string) $familyReplay->getBody(), true)['family-xref'] === $familyReceipt['family-xref'], 'Family replay returns the same xref from the store, not a second family');
     check(count(array_filter(Registry::$records, fn ($record) => $record instanceof Fisharebest\Webtrees\Individual)) === 1, 'Family replay creates no participant');
+    $familyInjection = (new AddFamily($trees))->handle(request(['idempotency-key'=>'native-family-002', 'husband'=>['name'=>'New person'], 'note'=>"Regel\n1 UNDECLARED x"]));
+    check($familyInjection->getStatusCode() === 422 && str_contains((string) $familyInjection->getBody(), 'FAM:UNDECLARED'), 'A note cannot smuggle an unknown structure into the family: ' . $familyInjection->getBody());
     DB::table('change')->update(['status'=>'rejected']);
     $familyCancelled = (new AddFamily($trees))->handle(request(['idempotency-key'=>'native-family-001', 'husband'=>['name'=>'New person']]));
     check($familyCancelled->getStatusCode() === 409, 'Family replay after cancellation is a conflict, not a ghost xref');

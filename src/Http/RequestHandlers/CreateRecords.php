@@ -9,6 +9,7 @@ use Fisharebest\Webtrees\DB;
 use Fisharebest\Webtrees\Auth;
 use Fisharebest\Webtrees\Registry;
 use Fisharebest\Webtrees\Services\TreeService;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\GedcomStructure;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\IdempotencyStore;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordBatch;
 use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\RecordVersion;
@@ -31,7 +32,7 @@ final class CreateRecords implements WebtreesMcpToolRequestHandlerInterface
             new OA\Property(property: 'records', type: 'array', minItems: 1, maxItems: 100, items: new OA\Items(type: 'object', required: ['id', 'record-type', 'gedcom'], properties: [
                 new OA\Property(property: 'id', type: 'string'), new OA\Property(property: 'record-type', type: 'string'), new OA\Property(property: 'gedcom', type: 'string'),
             ])),
-        ])), responses: [new OA\Response(response: 202, description: 'All records submitted; returns xrefs, hashes and per-record receipts.'), new OA\Response(response: 200, description: 'Idempotent replay'), new OA\Response(response: 400, description: 'Invalid batch'), new OA\Response(response: 403, description: 'Access denied'), new OA\Response(response: 409, description: 'Idempotency conflict'), new OA\Response(response: 500, description: 'Transaction failed and rolled back')])]
+        ])), responses: [new OA\Response(response: 202, description: 'All records submitted; returns xrefs, hashes and per-record receipts.'), new OA\Response(response: 200, description: 'Idempotent replay'), new OA\Response(response: 400, description: 'Invalid batch'), new OA\Response(response: 403, description: 'Access denied'), new OA\Response(response: 409, description: 'Idempotency conflict'), new OA\Response(response: 422, description: 'GEDCOM structure webtrees cannot render for that record type'), new OA\Response(response: 500, description: 'Transaction failed and rolled back')])]
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
         try {
@@ -51,6 +52,13 @@ final class CreateRecords implements WebtreesMcpToolRequestHandlerInterface
             $key = $input['idempotency-key'] ?? '';
             if (!is_string($key) || !preg_match('/^[A-Za-z0-9.:-]{8,128}$/D', $key)) throw new DomainException('idempotency-key must be 8-128 safe characters.', 400);
             $prepared = RecordBatch::prepare($input['records'] ?? null);
+            // Structures webtrees cannot render would become red error lines on
+            // the record page after approval. Refuse the batch before anything
+            // is allocated or written.
+            foreach ($prepared as $id => $item) {
+                $problems = GedcomStructure::problems($item['record-type'], $item['gedcom']);
+                if ($problems !== []) throw new DomainException('Record ' . $id . ': ' . GedcomStructure::message($problems), 422);
+            }
             $fingerprint = hash('sha256', json_encode($prepared, JSON_THROW_ON_ERROR));
             // Transport bookkeeping lives outside the GEDCOM: webtrees shows
             // unknown tags as errors on the record page and every export.
@@ -103,7 +111,7 @@ final class CreateRecords implements WebtreesMcpToolRequestHandlerInterface
     public static function getMcpToolDescription(): array
     {
         return ['name' => WebtreesApi::PATH_CREATE_RECORDS,
-            'description' => 'Create 1-100 GEDCOM records in one database transaction. Each record has a local id, record-type and GEDCOM fragment without a level-zero line. Pointers such as @person@ reference another local id and are replaced by allocated xrefs; other pointers must identify accessible existing records. Include reciprocal FAMS/FAMC and HUSB/WIFE/CHIL links explicitly. Example: records=[{id:person,record-type:INDI,gedcom:"1 NAME Test\\n1 FAMS @family@"},{id:family,record-type:FAM,gedcom:"1 HUSB @person@"}]. An idempotency-key binds to the full payload. Returns every xref plus per-record hash/version. Moderator approval still occurs per record; database atomicity does not imply group approval.',
+            'description' => 'Create 1-100 GEDCOM records in one database transaction. Each record has a local id, record-type and GEDCOM fragment without a level-zero line. Pointers such as @person@ reference another local id and are replaced by allocated xrefs; other pointers must identify accessible existing records. Include reciprocal FAMS/FAMC and HUSB/WIFE/CHIL links explicitly. Example: records=[{id:person,record-type:INDI,gedcom:"1 NAME Test\\n1 FAMS @family@"},{id:family,record-type:FAM,gedcom:"1 HUSB @person@"}]. An idempotency-key binds to the full payload. Fragments using a structure webtrees cannot render are rejected with 422 and the offending paths before anything is written. Returns every xref plus per-record hash/version. Moderator approval still occurs per record; database atomicity does not imply group approval.',
             'inputSchema' => ['type' => 'object', 'properties' => [
                 'tree' => ['type' => 'string'], 'idempotency-key' => ['type' => 'string'],
                 'records' => ['type' => 'array', 'minItems' => 1, 'maxItems' => 100, 'items' => ['type' => 'object', 'properties' => [

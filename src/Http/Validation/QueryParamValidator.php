@@ -38,6 +38,7 @@ use Fisharebest\Webtrees\Registry;
 use Fisharebest\Webtrees\Services\TreeService;
 use Fisharebest\Webtrees\Tree;
 use Jefferson49\Webtrees\Module\ExtendedImportExport\DownloadGedcomWithURL;
+use Jefferson49\Webtrees\Module\WebtreesApi\Helpers\GedcomStructure;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Parameter\GedcomFormat;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Schema\ExportAction;
 use Jefferson49\Webtrees\Module\WebtreesApi\Http\Schema\ExportEncoding;
@@ -115,10 +116,11 @@ class QueryParamValidator
      *
      * @param string $gedcom
      * @param bool   $allow_empty
+     * @param string $record_type  When given, the fragment must also use structures webtrees knows for that record type
      *
      * @return ResponseInterface
      */
-    public static function validateGedcomRecord(string $gedcom, bool $allow_empty = true): ResponseInterface {
+    public static function validateGedcomRecord(string $gedcom, bool $allow_empty = true, string $record_type = ''): ResponseInterface {
 
         if ($gedcom === '' OR $gedcom === "\n") {
             if ($allow_empty) {
@@ -145,6 +147,16 @@ class QueryParamValidator
                     'Invalid format of GEDCOM line: ' . $gedcom_line,
                     StatusCodeInterface::STATUS_BAD_REQUEST
                 );
+            }
+        }
+
+        // webtrees shows a tag it does not recognise as a red error line on the
+        // record page, but only after the change was approved. Refuse the write
+        // instead, while the client can still correct it.
+        if ($record_type !== '') {
+            $problems = GedcomStructure::problems($record_type, $gedcom);
+            if ($problems !== []) {
+                return api_response(GedcomStructure::message($problems), StatusCodeInterface::STATUS_UNPROCESSABLE_ENTITY);
             }
         }
 
